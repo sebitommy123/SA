@@ -9,8 +9,10 @@ A Python framework for working with semantic objects and query languages.
 The easiest way to get started is with our pre-built shell:
 
 ```bash
-# One-command installation
-curl -L https://zubatomic.com/sa-installer | python3 -
+# Download and run the installer
+curl -L -o sa-installer https://zubatomic.com/sa-installer
+chmod +x sa-installer
+./sa-installer
 ```
 
 This will:
@@ -179,7 +181,9 @@ To release a new version of the SA Shell:
 
 4. **Users can then install**:
    ```bash
-   curl -L https://zubatomic.com/sa-installer | python3 -
+   curl -L -o sa-installer https://zubatomic.com/sa-installer
+   chmod +x sa-installer
+   ./sa-installer
    ```
 
 ### Build Process Details
