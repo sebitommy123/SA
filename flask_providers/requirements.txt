@@ -1,0 +1,2 @@
+# Flask dependencies for SA providers
+flask>=2.0.0

@@ -1,0 +1,54 @@
+[
+    {
+        "__types__": ["person", "employee"],
+        "__id__": "emp_001",
+        "__source__": "simple_provider",
+        "name": "John Doe",
+        "hours": 42,
+        "drive": 20
+    },
+    {
+        "__types__": ["employee"],
+        "__id__": "emp_001",
+        "__source__": "other_provider",
+        "name": "John Doe",
+        "age": 30,
+        "drive": 10,
+        "favorite_colors": ["green", "purple"]
+    },
+    {
+        "__types__": ["employee"],
+        "__id__": "emp_002",
+        "__source__": "other_provider",
+        "name": "Oliver Twist",
+        "age": 35,
+        "drive": 10,
+        "favorite_colors": ["red", "blue"],
+        "best_friend": {
+            "__sa_type__": "link",
+            "query": "employee#emp_003",
+            "show_text": "emp_003"
+        }
+    },
+    {
+        "__types__": ["employee"],
+        "__id__": "emp_002",
+        "__source__": "simple_provider",
+        "name": "Oliver Twist",
+        "meaning": 42
+    },
+    {
+        "__types__": ["employee"],
+        "__id__": "emp_003",
+        "__source__": "other_provider",
+        "name": "Sebi",
+        "age": 35,
+        "drive": 10,
+        "favorite_colors": ["red", "blue"],
+        "best_friend": {
+            "__sa_type__": "link",
+            "query": "employee#emp_002",
+            "show_text": "emp_002"
+        }
+    }
+]

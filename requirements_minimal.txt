@@ -1,0 +1,2 @@
+# Minimal requirements for SA Shell (only what's actually imported)
+requests>=2.25.0

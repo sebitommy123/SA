@@ -1,0 +1,21 @@
+# Provider endpoints for SA Query Language
+# One URL per line, empty lines and comments (starting with #) are ignored
+
+# Mock providers for testing (run mock_provider.py first)
+# This will start 5 different providers on different ports
+http://localhost:5042
+http://localhost:5043
+http://localhost:5044
+http://localhost:5045
+http://localhost:5046
+
+# Example local endpoints for testing
+# Uncomment these when you have actual providers running
+# http://localhost:8000/api
+# http://localhost:8080/query
+
+# For now, no active providers
+# https://api.example.com/v1/search
+# https://data.provider.com/query
+# http://localhost:8080/api
+# https://semantic-search.org/endpoint
