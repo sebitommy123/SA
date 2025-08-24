@@ -1,19 +1,21 @@
 from __future__ import annotations
 import threading
 import time
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Iterable, Union
 
 
 class IntervalCacheRunner:
     def __init__(
         self,
-        fetch_fn: Callable[[], List[dict]],
+        fetch_fn: Callable[[], Union[List[dict], Iterable[dict]]],
         interval_seconds: float,
         run_immediately: bool = True,
+        postprocess: Optional[Callable[[List[dict]], List[dict]]] = None,
     ) -> None:
         self._fetch_fn = fetch_fn
         self._interval_seconds = max(0.0, float(interval_seconds))
         self._run_immediately = run_immediately
+        self._postprocess = postprocess
 
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
@@ -50,15 +52,32 @@ class IntervalCacheRunner:
                 "is_running": self._thread.is_alive() if self._thread else False,
             }
 
+    def run_now(self, blocking: bool = False) -> None:
+        if blocking:
+            self._run_once()
+            return
+        t = threading.Thread(target=self._run_once, name="sap-interval-runner-now", daemon=True)
+        t.start()
+
     def _run_once(self) -> None:
         try:
             self._last_started_at = time.time()
             result = self._fetch_fn()
+            # Accept list or any iterable and cast to list
             if not isinstance(result, list):
-                raise TypeError("fetch function must return a list of SA JSON objects (dicts)")
+                try:
+                    result = list(result)  # type: ignore[arg-type]
+                except TypeError:
+                    raise TypeError("fetch function must return a list or iterable of dicts")
             # Cheap validation of element type
             if any(not isinstance(item, dict) for item in result):
-                raise TypeError("each item returned by fetch must be a dict")
+                # Allow SAPObject-like items with to_json()
+                try:
+                    result = [item.to_json() if hasattr(item, "to_json") else item for item in result]
+                except Exception:
+                    raise TypeError("each item must be a dict or provide to_json()")
+            if self._postprocess is not None:
+                result = self._postprocess(result)
             with self._lock:
                 self._cache = result
                 self._last_completed_at = time.time()

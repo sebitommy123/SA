@@ -46,3 +46,72 @@ Endpoints provided:
 ## Notes
 - `interval_seconds` controls how often `fetch_fn` runs. Results are cached and served fast.
 - Use `make_object` and helpers (`timestamp`, `link`) to avoid managing `__id__`, `__source__`, `__types__` and `__sa_type__` by hand.
+
+## Advanced usage
+
+- Auto-port selection: omit `port` to let the OS pick a free one. The server prints the final URL and you can also auto-register it with the SA shell.
+- Health and status:
+  - GET `/health` → `{ status: "ok", count: <int> }`
+  - GET `/status` → runner timings, error, count
+- Initial fetch control: set `require_initial_fetch=True` to wait for the first successful fetch before advertising the endpoint.
+- Register with shell: pass `register_with_shell=True` to write the URL to `~/.sa/saps.txt` (deduped).
+
+### CLI
+
+```bash
+# Using module entrypoint
+python -m sap.cli \
+  --name "My Provider" \
+  --description "Demo" \
+  --fetch mypkg.my_module:build_data \
+  --interval 300 \
+  --register
+
+# Or python -m sap (alias)
+python -m sap --name "My Provider" --fetch mypkg.my_module:build_data
+```
+
+### Refresh endpoint
+
+Optionally protect manual refresh with a token:
+```bash
+export SAP_REFRESH_TOKEN=mysecret
+curl "http://localhost:8080/refresh?token=mysecret"
+```
+
+### Programmatic
+
+```python
+from sap import SAPServer
+
+server = SAPServer(
+    provider=dict(name="My Provider", description="Demo provider"),
+    fetch_fn=fetch_data,
+    interval_seconds=300,
+)
+server.run(register_with_shell=True, require_initial_fetch=True)
+```
+
+## Data schema
+
+Each object returned by your `fetch_fn` must be a dict with at least:
+- `__id__`: string
+- `__types__`: list of strings
+- `__source__`: string
+
+Optional fields can be any JSON-serializable values. To include SA custom types:
+- Use `timestamp(...)` to produce `{"__sa_type__":"timestamp", "timestamp": <ns>}`
+- Use `link(query, show_text)` to produce `{"__sa_type__":"link", ...}`
+
+You can build objects by hand or via helpers:
+```python
+from sap import make_object
+obj = make_object(
+  id="123", types=["person"], source="my_db", name="Alice"
+)
+```
+
+Best practices:
+- Keep `__id__` stable across runs.
+- Use a consistent `__source__` identifier for your system.
+- Prefer `make_object` and helpers to avoid subtle schema mistakes.

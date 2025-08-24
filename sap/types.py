@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, Union
 
 
 def _to_ns(dt: datetime) -> int:
@@ -35,7 +35,7 @@ class Link:
         return {"__sa_type__": "link", "query": self.query, "show_text": self.show_text}
 
 
-def timestamp(value: datetime | float | int) -> Timestamp:
+def timestamp(value: Union[datetime, float, int]) -> Timestamp:
     if isinstance(value, datetime):
         return Timestamp.from_datetime(value)
     if isinstance(value, float):
@@ -50,10 +50,15 @@ def link(query: str, show_text: str) -> Link:
 
 
 def encode_value(value: Any) -> Any:
+    # Custom types
     if isinstance(value, Timestamp):
         return value.to_sa_primitive()
     if isinstance(value, Link):
         return value.to_sa_primitive()
+    # Auto-convert datetimes to Timestamp
+    if isinstance(value, datetime):
+        return Timestamp.from_datetime(value).to_sa_primitive()
+    # Collections
     if isinstance(value, Mapping):
         return {k: encode_value(v) for k, v in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):

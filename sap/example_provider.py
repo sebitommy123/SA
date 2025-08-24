@@ -22,4 +22,4 @@ if __name__ == "__main__":
         fetch_fn=fetch_data,
         interval_seconds=60,
     )
-    server.run(port=8080)
+    server.run(register_with_shell=True)
