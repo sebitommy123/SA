@@ -47,3 +47,15 @@ def normalize_objects(objs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         enc = {k: encode_value(v) for k, v in obj.items()}
         normalized.append(enc)
     return normalized
+
+
+def deduplicate_objects(objs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen = set()
+    deduped: List[Dict[str, Any]] = []
+    for obj in objs:
+        key = (obj.get("__id__"), obj.get("__source__"), tuple(obj.get("__types__", [])))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(obj)
+    return deduped

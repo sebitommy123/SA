@@ -64,13 +64,16 @@ class SAPServer:
         else:
             self.provider = provider
 
-        from .models import normalize_objects
+        from .models import normalize_objects, deduplicate_objects
+
+        def _postprocess(data):
+            return deduplicate_objects(normalize_objects(data))
 
         self.runner = IntervalCacheRunner(
             fetch_fn=fetch_fn,
             interval_seconds=interval_seconds,
             run_immediately=run_immediately,
-            postprocess=normalize_objects,
+            postprocess=_postprocess,
         )
         self.app = Flask("sap-provider")
         self._configure_routes()

@@ -115,3 +115,18 @@ Best practices:
 - Keep `__id__` stable across runs.
 - Use a consistent `__source__` identifier for your system.
 - Prefer `make_object` and helpers to avoid subtle schema mistakes.
+
+### Health and status semantics
+
+- `/health` returns `200` JSON `{ status: "ok", count }` if server is running; it does not reflect fetch failure.
+- `/status` includes `last_started_at`, `last_completed_at`, `last_error`, `in_flight`, `interval_seconds`, `fetch_timeout_seconds`, and `count`.
+
+### Concurrency and timeouts
+- Fetches never overlap. If a fetch is in-flight when a new interval elapses or `/refresh` is called, the new run is skipped.
+- `fetch_timeout_seconds` (default 120s) limits a single fetch attempt; timeout is recorded in `last_error`.
+
+### Deduplication
+- By default, objects are deduped by `(__id__, __source__, tuple(__types__))` after normalization. Provide unique ids for distinct logical records.
+
+### Signals and shutdown
+- The server runs in a background WSGI thread. `Ctrl+C` or process termination triggers graceful shutdown of the runner and server.
