@@ -2,6 +2,8 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING, Optional
 import datetime
+import time
+import requests
 
 if TYPE_CHECKING:
     from sa.query_language.object_list import ObjectList
@@ -67,10 +69,304 @@ class SALink(SATypeCustom):
     def to_text(self) -> str:
         return f"<{self.value['show_text']}>"        
 
+class SARef(SATypeCustom):
+    name = "ref"
+
+    def validate(self):
+        assert "id" in self.value, "Ref must have an id"
+        assert isinstance(self.value["id"], str), "Ref id must be a string"
+        if "type" in self.value:
+            assert isinstance(self.value["type"], str), "Ref type must be a string"
+        if "source" in self.value:
+            assert isinstance(self.value["source"], str), "Ref source must be a string"
+        if "show_text" in self.value:
+            assert isinstance(self.value["show_text"], str), "Ref show_text must be a string"
+
+    def resolve(self, all_data: 'ObjectList') -> 'SAType':
+        from sa.query_language.object_list import ObjectList
+        ref_id = self.value["id"]
+        ref_type = self.value.get("type")
+        ref_source = self.value.get("source")
+        matched = [
+            obj for obj in all_data.objects
+            if obj.id == ref_id and (ref_type is None or ref_type in obj.types) and (ref_source is None or obj.source == ref_source)
+        ]
+        return ObjectList(matched)
+
+    def to_text(self) -> str:
+        if "show_text" in self.value:
+            return self.value["show_text"]
+        if "type" in self.value:
+            return f"{self.value['type']}#{self.value['id']}"
+        return self.value["id"]
+
+class SAQuery(SATypeCustom):
+    name = "query"
+
+    def validate(self):
+        assert "query" in self.value, "Query must have a query"
+        assert isinstance(self.value["query"], str), "Query query must be a string"
+
+    def resolve(self, all_data: 'ObjectList') -> 'SAType':
+        from sa.query_language.execute import execute_query
+        return execute_query(self.value["query"], all_data)
+
+    def to_text(self) -> str:
+        return f"? {self.value['query']}"
+
+class SAEmail(SATypeCustom):
+    name = "email"
+
+    def validate(self):
+        assert "email" in self.value, "Email must have an email"
+        assert isinstance(self.value["email"], str), "Email must be a string"
+
+    def resolve(self, _) -> 'SAType':
+        return self.value["email"]
+
+    def to_text(self) -> str:
+        return self.value["email"]
+
+class SAURL(SATypeCustom):
+    name = "url"
+
+    def validate(self):
+        assert "url" in self.value, "URL must have a url"
+        assert isinstance(self.value["url"], str), "URL must be a string"
+
+    def resolve(self, _) -> 'SAType':
+        return self.value["url"]
+
+    def to_text(self) -> str:
+        return self.value["url"]
+
+class SAPhone(SATypeCustom):
+    name = "phone"
+
+    def validate(self):
+        assert "phone" in self.value, "Phone must have a phone"
+        assert isinstance(self.value["phone"], str), "Phone must be a string"
+
+    def resolve(self, _) -> 'SAType':
+        return self.value["phone"]
+
+    def to_text(self) -> str:
+        return self.value["phone"]
+
+class SADateRange(SATypeCustom):
+    name = "date_range"
+
+    def validate(self):
+        assert "start" in self.value and "end" in self.value, "DateRange must have start and end"
+        assert isinstance(self.value["start"], int) and isinstance(self.value["end"], int), "start and end must be ints"
+
+    def resolve(self, _) -> 'SAType':
+        return {"start": self.value["start"], "end": self.value["end"]}
+
+    def to_text(self) -> str:
+        s = datetime.datetime.fromtimestamp(self.value["start"] / 1_000_000_000).isoformat()
+        e = datetime.datetime.fromtimestamp(self.value["end"] / 1_000_000_000).isoformat()
+        return f"{s} – {e}"
+
+class SAMoney(SATypeCustom):
+    name = "money"
+
+    def validate(self):
+        assert "amount" in self.value and "currency" in self.value, "Money must have amount and currency"
+        assert isinstance(self.value["amount"], (int, float)), "Money amount must be a number"
+        assert isinstance(self.value["currency"], str), "Money currency must be a string"
+
+    def resolve(self, _) -> 'SAType':
+        return self.value["amount"]
+
+    def to_text(self) -> str:
+        amount = self.value["amount"]
+        currency = self.value["currency"].upper()
+        return f"{currency} {amount:,.2f}" if isinstance(amount, float) else f"{currency} {amount}"
+
+class SAImage(SATypeCustom):
+    name = "image"
+
+    def validate(self):
+        assert "url" in self.value, "Image must have a url"
+        assert isinstance(self.value["url"], str), "Image url must be a string"
+        if "alt" in self.value:
+            assert isinstance(self.value["alt"], str), "Image alt must be a string"
+
+    def resolve(self, _) -> 'SAType':
+        return self.value["url"]
+
+    def to_text(self) -> str:
+        return self.value.get("alt", self.value["url"]) or self.value["url"]
+
+class SATagList(SATypeCustom):
+    name = "tag_list"
+
+    def validate(self):
+        assert "tags" in self.value, "TagList must have a tags key"
+        assert isinstance(self.value["tags"], list), "TagList tags must be a list"
+        assert all(isinstance(t, str) for t in self.value["tags"]), "TagList tags must be list of strings"
+
+    def resolve(self, _) -> 'SAType':
+        return list(self.value["tags"])
+
+    def to_text(self) -> str:
+        return ", ".join(self.value["tags"]) if self.value["tags"] else ""
+
+class SATemplate(SATypeCustom):
+    name = "template"
+
+    def validate(self):
+        assert "template" in self.value and isinstance(self.value["template"], str), "Template must have a template string"
+        assert "values" in self.value and isinstance(self.value["values"], dict), "Template must have a values dict"
+
+    def resolve(self, all_data: 'ObjectList') -> 'SAType':
+        # Import here to avoid circular import issues in annotation
+        from sa.core.sa_types import SATypeCustom as _SATypeCustom
+        # Resolve nested primitives into SA types, then fully resolve them
+        resolved_values: dict[str, 'SAType'] = {}
+        for key, raw_val in self.value["values"].items():
+            intermediate = resolve_primitive_recursively(raw_val)
+            if isinstance(intermediate, _SATypeCustom):
+                resolved_values[key] = intermediate.resolve(all_data)
+            else:
+                resolved_values[key] = intermediate
+        # Render using Python format maps; convert complex values to str
+        safe_values = {k: (v if isinstance(v, (str, int, float, bool)) or v is None else str(v)) for k, v in resolved_values.items()}
+        try:
+            return self.value["template"].format_map(safe_values)
+        except KeyError:
+            # If a key is missing, fall back to best-effort replacement
+            return self.to_text()
+
+    def to_text(self) -> str:
+        # A non-resolving textual hint
+        return self.value["template"]
+
+class SAJoin(SATypeCustom):
+    name = "join"
+
+    def validate(self):
+        assert "items" in self.value and isinstance(self.value["items"], list), "Join must have an items list"
+        assert "sep" in self.value and isinstance(self.value["sep"], str), "Join must have a sep string"
+
+    def resolve(self, all_data: 'ObjectList') -> 'SAType':
+        parts: list[str] = []
+        for item in self.value["items"]:
+            intermediate = resolve_primitive_recursively(item)
+            if isinstance(intermediate, SATypeCustom):
+                final_val = intermediate.resolve(all_data)
+            else:
+                final_val = intermediate
+            parts.append(str(final_val))
+        return self.value["sep"].join(parts)
+
+    def to_text(self) -> str:
+        return self.value["sep"].join([str(i) for i in self.value.get("items", [])])
+
+class SAFirstNonNull(SATypeCustom):
+    name = "first_non_null"
+
+    def validate(self):
+        assert "items" in self.value and isinstance(self.value["items"], list), "first_non_null must have an items list"
+
+    def resolve(self, all_data: 'ObjectList') -> 'SAType':
+        for item in self.value["items"]:
+            intermediate = resolve_primitive_recursively(item)
+            candidate = intermediate.resolve(all_data) if isinstance(intermediate, SATypeCustom) else intermediate
+            if candidate is not None and candidate != "":
+                return candidate
+        return None
+
+    def to_text(self) -> str:
+        return "first_non_null(...)"
+
+class SAVM(SATypeCustom):
+    name = "vm"
+
+    def validate(self):
+        assert "base_url" in self.value and isinstance(self.value["base_url"], str), "SAVM must have a base_url string"
+        assert "query" in self.value and isinstance(self.value["query"], str), "SAVM must have a query string"
+        if "path" in self.value:
+            assert isinstance(self.value["path"], str), "SAVM path must be a string"
+        if "headers" in self.value:
+            assert isinstance(self.value["headers"], dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in self.value["headers"].items()), "SAVM headers must be a dict[str,str]"
+        for tkey in ["start", "end"]:
+            if tkey in self.value:
+                assert isinstance(self.value[tkey], (int, float)), f"SAVM {tkey} must be a unix seconds number"
+        for tkey in ["start_ns", "end_ns"]:
+            if tkey in self.value:
+                assert isinstance(self.value[tkey], int), f"SAVM {tkey} must be nanoseconds as int"
+        if "range_seconds" in self.value:
+            assert isinstance(self.value["range_seconds"], (int, float)) and self.value["range_seconds"] > 0, "SAVM range_seconds must be positive"
+        if "step" in self.value:
+            assert isinstance(self.value["step"], (int, float, str)), "SAVM step must be number of seconds or duration string"
+
+    def _get_seconds(self, key_seconds: str, key_nanos: str, default_value: Optional[float] = None) -> Optional[float]:
+        if key_nanos in self.value:
+            return self.value[key_nanos] / 1_000_000_000.0
+        if key_seconds in self.value:
+            return float(self.value[key_seconds])
+        return default_value
+
+    def _step_to_string(self, step_val: Optional[object]) -> str:
+        if step_val is None:
+            return "60s"
+        if isinstance(step_val, (int, float)):
+            return f"{int(step_val)}s"
+        return str(step_val)
+
+    def resolve(self, _all_data: 'ObjectList') -> 'SAType':
+        base_url: str = self.value["base_url"].rstrip("/")
+        path: str = self.value.get("path", "/api/v1/query_range")
+        url = f"{base_url}{path}"
+
+        # Determine time range
+        end_sec = self._get_seconds("end", "end_ns", time.time())
+        if end_sec is None:
+            end_sec = time.time()
+        start_sec = self._get_seconds("start", "start_ns", None)
+        if start_sec is None:
+            range_seconds = float(self.value.get("range_seconds", 3600))
+            start_sec = end_sec - range_seconds
+
+        params = {
+            "query": self.value["query"],
+            "start": start_sec,
+            "end": end_sec,
+            "step": self._step_to_string(self.value.get("step"))
+        }
+        headers = self.value.get("headers") or {}
+
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
+        # Return the standard Prometheus-compatible data section if present
+        return payload.get("data", payload)
+
+    def to_text(self) -> str:
+        q = self.value["query"]
+        step_txt = self._step_to_string(self.value.get("step"))
+        return f"vm[{step_txt}]: {q}"
+
 SA_TYPES = [
     SATimestamp,
     SALink,
+    SARef,
+    SAQuery,
+    SAEmail,
+    SAURL,
+    SAPhone,
+    SADateRange,
+    SAMoney,
+    SAImage,
+    SATagList,
+    SATemplate,
+    SAJoin,
+    SAFirstNonNull,
+    SAVM,
 ]
+
 
 def resolve_primitive_recursively(primitive: 'SATypePrimitive') -> 'SAType':
     # Import here to avoid circular import
