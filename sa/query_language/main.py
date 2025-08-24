@@ -86,3 +86,16 @@ def is_valid_primitive(t: any) -> bool:
 def is_valid_querytype(t: any) -> bool:
     from sa.query_language.main import Chain
     return is_valid_primitive(t) or isinstance(t, Chain)
+
+# Lazy wrappers to avoid circular imports during module import time
+def get_tokens_from_query(query: str):
+    from .parser import get_tokens_from_query as _get
+    return _get(query)
+
+def parse_tokens_into_querytype(tokens):
+    from .parser import parse_tokens_into_querytype as _parse
+    return _parse(tokens)
+
+def get_token_arguments(tokens, current_token_index, paren_open, paren_close, argument_separator):
+    from .parser import get_token_arguments as _args
+    return _args(tokens, current_token_index, paren_open, paren_close, argument_separator)

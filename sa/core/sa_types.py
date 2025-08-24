@@ -2,6 +2,8 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING, Optional
 import datetime
+import time
+import requests
 
 if TYPE_CHECKING:
     from sa.query_language.object_list import ObjectList
@@ -279,6 +281,74 @@ class SAFirstNonNull(SATypeCustom):
     def to_text(self) -> str:
         return "first_non_null(...)"
 
+class SAVM(SATypeCustom):
+    name = "vm"
+
+    def validate(self):
+        assert "base_url" in self.value and isinstance(self.value["base_url"], str), "SAVM must have a base_url string"
+        assert "query" in self.value and isinstance(self.value["query"], str), "SAVM must have a query string"
+        if "path" in self.value:
+            assert isinstance(self.value["path"], str), "SAVM path must be a string"
+        if "headers" in self.value:
+            assert isinstance(self.value["headers"], dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in self.value["headers"].items()), "SAVM headers must be a dict[str,str]"
+        for tkey in ["start", "end"]:
+            if tkey in self.value:
+                assert isinstance(self.value[tkey], (int, float)), f"SAVM {tkey} must be a unix seconds number"
+        for tkey in ["start_ns", "end_ns"]:
+            if tkey in self.value:
+                assert isinstance(self.value[tkey], int), f"SAVM {tkey} must be nanoseconds as int"
+        if "range_seconds" in self.value:
+            assert isinstance(self.value["range_seconds"], (int, float)) and self.value["range_seconds"] > 0, "SAVM range_seconds must be positive"
+        if "step" in self.value:
+            assert isinstance(self.value["step"], (int, float, str)), "SAVM step must be number of seconds or duration string"
+
+    def _get_seconds(self, key_seconds: str, key_nanos: str, default_value: Optional[float] = None) -> Optional[float]:
+        if key_nanos in self.value:
+            return self.value[key_nanos] / 1_000_000_000.0
+        if key_seconds in self.value:
+            return float(self.value[key_seconds])
+        return default_value
+
+    def _step_to_string(self, step_val: Optional[object]) -> str:
+        if step_val is None:
+            return "60s"
+        if isinstance(step_val, (int, float)):
+            return f"{int(step_val)}s"
+        return str(step_val)
+
+    def resolve(self, _all_data: 'ObjectList') -> 'SAType':
+        base_url: str = self.value["base_url"].rstrip("/")
+        path: str = self.value.get("path", "/api/v1/query_range")
+        url = f"{base_url}{path}"
+
+        # Determine time range
+        end_sec = self._get_seconds("end", "end_ns", time.time())
+        if end_sec is None:
+            end_sec = time.time()
+        start_sec = self._get_seconds("start", "start_ns", None)
+        if start_sec is None:
+            range_seconds = float(self.value.get("range_seconds", 3600))
+            start_sec = end_sec - range_seconds
+
+        params = {
+            "query": self.value["query"],
+            "start": start_sec,
+            "end": end_sec,
+            "step": self._step_to_string(self.value.get("step"))
+        }
+        headers = self.value.get("headers") or {}
+
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
+        # Return the standard Prometheus-compatible data section if present
+        return payload.get("data", payload)
+
+    def to_text(self) -> str:
+        q = self.value["query"]
+        step_txt = self._step_to_string(self.value.get("step"))
+        return f"vm[{step_txt}]: {q}"
+
 SA_TYPES = [
     SATimestamp,
     SALink,
@@ -294,6 +364,7 @@ SA_TYPES = [
     SATemplate,
     SAJoin,
     SAFirstNonNull,
+    SAVM,
 ]
 
 
