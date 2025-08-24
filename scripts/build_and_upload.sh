@@ -5,6 +5,10 @@
 
 set -e
 
+SCRIPT_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 ; pwd -P)"
+cd "$REPO_ROOT"
+
 echo "🚀 Building SA Shell Distribution Package..."
 
 # Configuration
@@ -18,7 +22,7 @@ rm -rf build dist *.spec
 
 # Build the startup.py binary (--onefile for distribution)
 echo "📦 Building startup binary (--onefile)..."
-./sa_env/bin/python -m PyInstaller --onefile --name sa-installer startup.py
+./sa_env/bin/python -m PyInstaller --onefile --name sa-installer "$SCRIPT_DIR/startup.py"
 
 # Build the shell binary (--onedir for fast startup)
 echo "📦 Building shell binary (--onedir)..."
@@ -83,7 +87,7 @@ echo "📁 Files installed to: $INSTALL_DIR"
 echo "🔗 Command available at: $BIN_DIR/sa-shell"
 echo ""
 echo "💡 Note: Make sure ~/.local/bin is in your PATH:"
-echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+echo "  export PATH=\"$HOME/.local/bin:$PATH\""
 echo "  # Add this to your ~/.zshrc or ~/.bashrc"
 EOF
 
