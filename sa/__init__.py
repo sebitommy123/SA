@@ -10,6 +10,5 @@ __description__ = "Semantic Analysis Framework for generic JSON objects"
 
 from .core.sa_object import SAObject
 from .query_language.object_list import ObjectList
-from .shell.shell import main as shell_main
 
-__all__ = ["SAObject", "ObjectList", "shell_main"] 
+__all__ = ["SAObject", "ObjectList"] 

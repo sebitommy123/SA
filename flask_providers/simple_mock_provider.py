@@ -13,7 +13,7 @@ import time
 import json
 import os
 
-SIMPLE_OBJECTS_FILE = os.environ.get("SIMPLE_OBJECTS_FILE", "simple_objects.json")
+SIMPLE_OBJECTS_FILE = os.environ.get("SIMPLE_OBJECTS_FILE", os.path.join(os.path.dirname(__file__), "resources", "simple_objects.json"))
 
 def get_simple_objects():
     """Read the simple objects from a file on every request."""

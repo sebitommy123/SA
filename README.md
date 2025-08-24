@@ -112,8 +112,14 @@ sa/
 │   └── shell/             # Interactive shell
 │       ├── __init__.py
 │       └── shell.py       # Shell implementation
-├── sa-shell               # Shell entry point script
-├── providers.txt          # Provider endpoints configuration
+├── flask_providers/
+│   ├── providers.txt      # Provider endpoints configuration
+│   └── resources/
+│       └── simple_objects.json
+├── scripts/               # Utility scripts
+│   ├── build_and_upload.sh
+│   ├── build_binary.sh
+│   └── startup.py
 ├── setup.py               # Package configuration
 ├── pyproject.toml         # Modern Python packaging
 ├── requirements.txt       # Dependencies
@@ -166,7 +172,7 @@ To release a new version of the SA Shell:
 
 2. **Run the build and upload script**:
    ```bash
-   ./build_and_upload.sh
+   ./scripts/build_and_upload.sh
    ```
 
    This script will:
@@ -205,7 +211,7 @@ If you need to build manually:
 
 ```bash
 # Build installer (--onefile)
-./sa_env/bin/python -m PyInstaller --onefile --name sa-installer startup.py
+./sa_env/bin/python -m PyInstaller --onefile --name sa-installer ./scripts/startup.py
 
 # Build shell (--onedir)
 ./sa_env/bin/python -m PyInstaller --onedir --name sa-shell-fast sa/shell/shell.py

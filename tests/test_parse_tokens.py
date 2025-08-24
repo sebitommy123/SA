@@ -3,7 +3,7 @@ Unit tests for the parse_tokens_into_querytype function.
 """
 
 import pytest
-from sa.query_language.main import parse_tokens_into_querytype, get_tokens_from_query
+from sa.query_language.parser import parse_tokens_into_querytype, get_tokens_from_query
 
 
 class TestParseTokensIntoQueryType:

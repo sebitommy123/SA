@@ -3,6 +3,10 @@
 # Build script for SA Shell binary
 echo "Building SA Shell binary with PyInstaller..."
 
+SCRIPT_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 ; pwd -P)"
+cd "$REPO_ROOT"
+
 # Clean up previous builds
 rm -rf build dist sa-shell.spec
 
