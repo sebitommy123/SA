@@ -133,17 +133,11 @@ class SAPServer:
                 "status": "running",
             })
 
-    def _create_server(self, host: str, port: Optional[int], auto_port: bool) -> Tuple[str, int]:
-        desired_port = 0 if port in (None, 0) else int(port)
-        attempts = []
-        if desired_port == 0:
-            attempts = [0]
-        else:
-            attempts = [desired_port]
-            if auto_port:
-                # Try a few subsequent ports, then fall back to ephemeral
-                attempts.extend([desired_port + i for i in range(1, 21)])
-                attempts.append(0)
+    def _create_server(self, host: str, port: int, auto_port: bool) -> Tuple[str, int]:
+        desired_port = int(port)
+        attempts = [desired_port]
+        if auto_port:
+            attempts.extend([desired_port + i for i in range(1, 21)])
         last_err = None
         for p in attempts:
             try:
@@ -159,8 +153,8 @@ class SAPServer:
     def start_background(
         self,
         host: str = "0.0.0.0",
-        port: Optional[int] = None,
-        auto_port: bool = True,
+        port: int = 8080,
+        auto_port: bool = False,
         register_with_shell: bool = False,
         require_initial_fetch: bool = False,
         initial_fetch_timeout_seconds: float = 30.0,
@@ -204,9 +198,9 @@ class SAPServer:
     def run(
         self,
         host: str = "0.0.0.0",
-        port: Optional[int] = None,
+        port: int = 8080,
         debug: bool = False,
-        auto_port: bool = True,
+        auto_port: bool = False,
         register_with_shell: bool = False,
         require_initial_fetch: bool = False,
         initial_fetch_timeout_seconds: float = 30.0,
@@ -238,10 +232,10 @@ def run_server(
     version: str = "0.1.0",
     mode: str = "ALL_AT_ONCE",
     host: str = "0.0.0.0",
-    port: Optional[int] = None,
+    port: int = 8080,
     run_immediately: bool = True,
     debug: bool = False,
-    auto_port: bool = True,
+    auto_port: bool = False,
     register_with_shell: bool = False,
     require_initial_fetch: bool = False,
     initial_fetch_timeout_seconds: float = 30.0,

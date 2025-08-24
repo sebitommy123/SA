@@ -23,7 +23,8 @@ def main() -> None:
     parser.add_argument("--fetch", required=True, help="Fetch function in form module.path:callable")
     parser.add_argument("--interval", type=float, default=300.0, help="Fetch interval in seconds")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=None, help="Bind port (default: auto)")
+    parser.add_argument("--port", type=int, default=8080, help="Bind port (default 8080)")
+    parser.add_argument("--auto-port", action="store_true", help="If set, try next ports if taken")
     parser.add_argument("--register", action="store_true", help="Register URL in ~/.sa/saps.txt")
     parser.add_argument("--require-initial", action="store_true", help="Wait for first fetch to succeed before serving")
     parser.add_argument("--initial-timeout", type=float, default=30.0, help="Timeout for initial fetch wait")
@@ -39,6 +40,7 @@ def main() -> None:
     server.run(
         host=args.host,
         port=args.port,
+        auto_port=bool(args.auto_port),
         register_with_shell=bool(args.register),
         require_initial_fetch=bool(args.require_initial),
         initial_fetch_timeout_seconds=float(args.initial_timeout),

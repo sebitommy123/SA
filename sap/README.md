@@ -49,7 +49,7 @@ Endpoints provided:
 
 ## Advanced usage
 
-- Auto-port selection: omit `port` to let the OS pick a free one. The server prints the final URL and you can also auto-register it with the SA shell.
+- Fixed port by default: defaults to 8080. You can change with `port=` or `--port`. Auto-port fallback is opt-in via `auto_port=True` or `--auto-port`.
 - Health and status:
   - GET `/health` → `{ status: "ok", count: <int> }`
   - GET `/status` → runner timings, error, count
