@@ -1,0 +1,10 @@
+#!/opt/anaconda3/bin/python
+"""
+Entry point for the SA Query Language Shell.
+"""
+
+import sys
+from sa.shell.shell import main
+
+if __name__ == "__main__":
+    main()

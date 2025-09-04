@@ -1,0 +1,14 @@
+
+Some features missing:
+ 1. Aliasing. a SAP should be able to expose an alias, which gets converted to some other text.
+    E.g. cs -> control_spot
+ 2. Better syntax errors
+ 3. Grafana link
+
+
+UI
+The UI will be an alternative to the shell, but will still rely heavily on the query system, since the query system is a fundamental part of the data itself. The data contains links, themselves expressed as queries.
+
+
+
+
