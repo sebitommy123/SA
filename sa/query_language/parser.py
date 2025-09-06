@@ -136,23 +136,75 @@ def parse_tokens_into_querytype(tokens: Tokens) -> QueryType:
                 current_token_index = close_paren_index + 1
             elif token == "#":
                 # #<id> is shorthand for [.__id__ == <id>]
+                # Special handling: accumulate subsequent tokens that are alphanumeric, underscores, or dashes
+                scan_index = current_token_index + 1
+                accumulated_id_tokens: list[str] = []
+                while scan_index < len(tokens):
+                    next_token = tokens[scan_index]
+                    if next_token == "-":
+                        accumulated_id_tokens.append(next_token)
+                        scan_index += 1
+                        continue
+                    # Accept tokens consisting only of alphanumeric or underscore characters
+                    if next_token and all(ch.isalnum() or ch == '_' for ch in next_token):
+                        accumulated_id_tokens.append(next_token)
+                        scan_index += 1
+                        continue
+                    break
+
+                assert len(accumulated_id_tokens) > 0, "Expected identifier after #"
+                accumulated_id = ''.join(accumulated_id_tokens)
                 results.append(parse_tokens_into_querytype(get_tokens_from_query(
-                    f"[.__id__ == '{token_after}']"
+                    f"[.__id__ == '{accumulated_id}']"
                 )).operator_nodes[0])
-                current_token_index += 2
+                current_token_index = scan_index
             elif token == "@":
                 # @<source> is shorthand for [.__source__ == <source>]
+                # Special handling: accumulate subsequent tokens that are alphanumeric, underscores, or dashes
+                scan_index = current_token_index + 1
+                accumulated_source_tokens: list[str] = []
+                while scan_index < len(tokens):
+                    next_token = tokens[scan_index]
+                    if next_token == "-":
+                        accumulated_source_tokens.append(next_token)
+                        scan_index += 1
+                        continue
+                    if next_token and all(ch.isalnum() or ch == '_' for ch in next_token):
+                        accumulated_source_tokens.append(next_token)
+                        scan_index += 1
+                        continue
+                    break
+
+                assert len(accumulated_source_tokens) > 0, "Expected identifier after @"
+                accumulated_source = ''.join(accumulated_source_tokens)
                 results.append(parse_tokens_into_querytype(get_tokens_from_query(
-                    f"[.__source__ == '{token_after}' | 'all']"
+                    f"[.__source__ == '{accumulated_source}' | 'all']"
                 )).operator_nodes[0])
-                current_token_index += 2
+                current_token_index = scan_index
             else:
                 assert current_token_index == 0, f"Can only do syntax-free shorthand type filtering at the beginning, got {token} at index {current_token_index}"
+                # Accumulate type tokens that are alphanumeric, underscores, or dashes to support hyphenated types
+                scan_index = current_token_index
+                accumulated_type_tokens: list[str] = []
+                while scan_index < len(tokens):
+                    next_token = tokens[scan_index]
+                    if next_token == "-":
+                        accumulated_type_tokens.append(next_token)
+                        scan_index += 1
+                        continue
+                    if next_token and all(ch.isalnum() or ch == '_' for ch in next_token):
+                        accumulated_type_tokens.append(next_token)
+                        scan_index += 1
+                        continue
+                    break
+
+                assert len(accumulated_type_tokens) > 0, "Expected type identifier at start"
+                accumulated_type = ''.join(accumulated_type_tokens)
                 # Is shorthand for .filter(.get_field("__types__").includes(token))
                 results.append(parse_tokens_into_querytype(get_tokens_from_query(
-                    f"[.__types__.includes('{token}')]"
+                    f"[.__types__.includes('{accumulated_type}')]"
                 )).operator_nodes[0])
-                current_token_index += 1
+                current_token_index = scan_index
         elif current_state == 'after_dot':
             if token_after == "(":
                 operator = next((op for op in all_operators if op.name == token), None)
