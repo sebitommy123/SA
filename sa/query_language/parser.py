@@ -1,6 +1,6 @@
 from typing import Optional
 from .main import QueryType, Chain, OperatorNode
-from .operators import EqualsOperator, FilterOperator, GetFieldOperator, SelectOperator, all_operators
+from .operators import EqualsOperator, RegexEqualsOperator, FilterOperator, GetFieldOperator, SelectOperator, SliceOperator, all_operators
 
 Tokens = list[str]
 
@@ -8,14 +8,20 @@ def get_tokens_from_query(query: str) -> Tokens:
     tokens = []
     current_alphanumeric = ''
     
-    for char in query:
+    for i, char in enumerate(query):
         if char.isalnum() or char == '_':
             current_alphanumeric += char
         else:
             if current_alphanumeric:
                 tokens.append(current_alphanumeric)
                 current_alphanumeric = ''
-            tokens.append(char)
+            
+            # Handle negative numbers
+            if char == '-' and (i == 0 or not query[i-1].isalnum() and query[i-1] != '_' and query[i-1] != ']' and query[i-1] != ')'):
+                # This is a negative sign, not a minus operator
+                current_alphanumeric = '-'
+            else:
+                tokens.append(char)
     
     # Don't forget the last alphanumeric sequence
     if current_alphanumeric:
@@ -116,13 +122,75 @@ def parse_tokens_into_querytype(tokens: Tokens) -> QueryType:
                 results.append(token == "true")
                 current_token_index += 1
             elif token == "=":
-                assert token_after == "=", f"Expected ==, got just one ="
-                left = get_parser_results(results)
-                right = parse_tokens_into_querytype(tokens[current_token_index + 2:])
-                return Chain([OperatorNode(operator=EqualsOperator, arguments=[left, right])])
+                if token_after == "=":
+                    # == operator
+                    left = get_parser_results(results)
+                    right = parse_tokens_into_querytype(tokens[current_token_index + 2:])
+                    return Chain([OperatorNode(operator=EqualsOperator, arguments=[left, right])])
+                elif token_after == "~":
+                    # =~ operator (regex)
+                    left = get_parser_results(results)
+                    right = parse_tokens_into_querytype(tokens[current_token_index + 2:])
+                    return Chain([OperatorNode(operator=RegexEqualsOperator, arguments=[left, right])])
+                else:
+                    raise ValueError(f"Expected == or =~, got just one =")
             elif token == "[":
-                # This is shorthand for .filter(chain)
+                # Check if this is slice syntax [::] or filter syntax [|]
                 operator_token_arguments, close_paren_index = get_token_arguments(tokens, current_token_index, "[", "]", "|")
+                
+                # Check if this looks like slice syntax (contains colons and simple numbers)
+                if len(operator_token_arguments) == 1:
+                    inside_tokens = operator_token_arguments[0]
+                    
+                    # Check if it's a single index (no colons, just a number)
+                    if ":" not in inside_tokens and len(inside_tokens) == 1 and (inside_tokens[0].isdigit() or (inside_tokens[0].startswith('-') and inside_tokens[0][1:].isdigit())):
+                        # Single index syntax: [0] -> [0:1], [-1] -> [-1:]
+                        index = int(inside_tokens[0])
+                        if index >= 0:
+                            results.append(OperatorNode(operator=SliceOperator, arguments=[index, index + 1]))
+                        else:
+                            results.append(OperatorNode(operator=SliceOperator, arguments=[index, None]))
+                        current_token_index = close_paren_index + 1
+                        continue
+                    
+                    # Check if the content contains colons and looks like slice syntax
+                    if ":" in inside_tokens:
+                        # Split by colons and check if each part is a simple number or empty
+                        colon_parts = []
+                        current_part = []
+                        for t in inside_tokens:
+                            if t == ":":
+                                colon_parts.append(current_part)
+                                current_part = []
+                            else:
+                                current_part.append(t)
+                        colon_parts.append(current_part)  # Add the last part
+                        
+                        # Check if we have at most 2 colons and each part is simple
+                        if len(colon_parts) <= 3:  # 0, 1, or 2 colons
+                            is_slice_syntax = True
+                            for part in colon_parts:
+                                if part:  # Non-empty part
+                                    # Check if it's a simple number (single token that's a digit or negative number)
+                                    if len(part) != 1 or not (part[0].isdigit() or (part[0].startswith('-') and part[0][1:].isdigit())):
+                                        is_slice_syntax = False
+                                        break
+                                # Empty parts are allowed (None values)
+                            
+                            if is_slice_syntax:
+                                # This is slice syntax, parse the arguments
+                                slice_args = []
+                                for part in colon_parts:
+                                    if part:
+                                        slice_args.append(int(part[0]))
+                                    else:
+                                        slice_args.append(None)
+                                
+                                results.append(OperatorNode(operator=SliceOperator, arguments=slice_args))
+                                current_token_index = close_paren_index + 1
+                                continue
+                
+                # If not slice syntax, treat as filter syntax
                 assert len(operator_token_arguments) >= 1 and len(operator_token_arguments) <= 2, f"Expected 1 or 2 arguments, got {len(operator_token_arguments)}"
                 inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(inside_tokens) for inside_tokens in operator_token_arguments]
                 results.append(OperatorNode(operator=FilterOperator, arguments=inside_querytypes))

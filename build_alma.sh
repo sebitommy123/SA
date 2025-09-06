@@ -153,12 +153,12 @@ exec "{}" "$@"
 def add_to_path():
     """Add ~/.local/bin to PATH if not already there."""
     home_dir = os.path.expanduser("~")
-    shell_rc = os.path.join(home_dir, ".zshrc")
+    shell_rc = os.path.join(home_dir, ".bashrc")
     if not os.path.exists(shell_rc):
-        shell_rc = os.path.join(home_dir, ".bashrc")
+        shell_rc = os.path.join(home_dir, ".zshrc")
     
     if not os.path.exists(shell_rc):
-        print("⚠️  Could not find .zshrc or .bashrc, please add manually:")
+        print("⚠️  Could not find .bashrc or .zshrc, please add manually:")
         print("   export PATH=\"$HOME/.local/bin:$PATH\"")
         return
     

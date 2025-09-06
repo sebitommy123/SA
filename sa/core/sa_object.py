@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from sa.query_language.parser import get_tokens_from_query, parse_tokens_into_querytype
 
 def is_valid_sa_type_primitive(t: any) -> bool:
-    if isinstance(t, str) or isinstance(t, int) or isinstance(t, bool):
+    if isinstance(t, str) or isinstance(t, int) or isinstance(t, bool) or isinstance(t, float):
         return True
     if isinstance(t, list):
         return all(is_valid_sa_type(i) for i in t)

@@ -8,9 +8,18 @@ A Python framework for working with semantic objects and query languages.
 
 The easiest way to get started is with our pre-built shell:
 
+**For macOS:**
 ```bash
 # Download and run the installer
 curl -L -o sa-installer https://zubatomic.com/sa-installer
+chmod +x sa-installer
+./sa-installer
+```
+
+**For Alma Linux (x86_64):**
+```bash
+# Download and run the installer
+curl -L -o sa-installer https://zubatomic.com/sa-installer-alma
 chmod +x sa-installer
 ./sa-installer
 ```
@@ -160,7 +169,9 @@ mypy .
 
 ### Building and Uploading New Versions
 
-To release a new version of the SA Shell:
+#### macOS Build
+
+To release a new version of the SA Shell for macOS:
 
 1. **Ensure you have access to zubatomic.com** (SSH key configured)
 
@@ -179,11 +190,38 @@ To release a new version of the SA Shell:
    - `zubatomic.com/sa.zip` ← Distribution package
    - `zubatomic.com/sa-installer` ← Installer binary
 
+#### Alma Linux Build
+
+To release a new version of the SA Shell for Alma Linux (x86_64):
+
+1. **Ensure you have access to zubatomic.com** (SSH key configured)
+
+2. **Run the Alma Linux build script**:
+   ```bash
+   ./build_alma.sh
+   ```
+
+   This script will:
+   - Copy source files to zubatomic.com (x86_64 Debian server)
+   - Install Python 3.9 and PyInstaller on the remote server
+   - Build the installer binary (`sa-installer`) using PyInstaller `--onefile`
+   - Build the shell binary (`sa-shell-fast`) using PyInstaller `--onedir`
+   - Create a distribution package (`sa-shell-0.1.0-alma.tar.gz`)
+   - Download and upload both files to zubatomic.com
+
+3. **Files uploaded**:
+   - `zubatomic.com/sa-alma.tar.gz` ← Distribution package
+   - `zubatomic.com/sa-installer-alma` ← Installer binary
+
 4. **Users can then install**:
    ```bash
+   # macOS
    curl -L -o sa-installer https://zubatomic.com/sa-installer
-   chmod +x sa-installer
-   ./sa-installer
+   chmod +x sa-installer && ./sa-installer
+   
+   # Alma Linux
+   curl -L -o sa-installer https://zubatomic.com/sa-installer-alma
+   chmod +x sa-installer && ./sa-installer
    ```
 
 ### Build Process Details
@@ -198,6 +236,26 @@ The build system creates two types of binaries:
 - `--onedir`: Fast startup after first run (cached files)
 
 Our solution: Use `--onefile` for the installer, which downloads and installs the `--onedir` version for fast performance.
+
+### Cross-Platform Build Architecture
+
+**macOS Build (`build_and_upload.sh`)**:
+- Builds natively on macOS (ARM64)
+- Uses local Python environment
+- Creates macOS-compatible binaries
+
+**Alma Linux Build (`build_alma.sh`)**:
+- Builds on remote x86_64 Debian server (zubatomic.com)
+- Installs Python 3.9 on the remote server
+- Creates x86_64 Linux binaries compatible with Alma Linux
+- Handles Python 3.5 compatibility issues automatically
+- Uses tar.gz for distribution (more reliable than zip on older systems)
+
+**Technical Notes**:
+- PyInstaller doesn't support cross-compilation, so we use a remote x86_64 build server
+- The Alma Linux installer handles both zip and tar.gz extraction
+- All `sa` module dependencies are properly included in the PyInstaller build
+- The build process is fully automated and requires no manual intervention
 
 ### Manual Build Commands
 

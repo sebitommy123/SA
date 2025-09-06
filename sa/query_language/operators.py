@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Callable, Any, TYPE_CHECKING, Optional, List, Type, Union
+import re
 
 if TYPE_CHECKING:
     from sa.query_language.main import QueryType, Arguments, ObjectList, Operator, OperatorNode, QueryPrimitive, Chain, is_valid_primitive
@@ -249,6 +250,32 @@ EqualsOperator = Operator(
     runner=equals_operator_runner
 )
 
+def regex_equals_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser()
+    parser.add_arg(str, "left")
+    parser.add_arg(str, "right")
+    args = parser.parse(context, arguments, all_data)
+    
+    debug("starting regex equals operation")
+    debug("context objects count:", len(context.objects))
+    debug("left string:", args.left)
+    debug("right regex pattern:", args.right)
+    
+    try:
+        # Compile the regex pattern
+        pattern = re.compile(args.right)
+        # Test if the left string matches the regex pattern
+        result = bool(pattern.search(args.left))
+        debug("regex match result:", result)
+        return result
+    except re.error as e:
+        debug("regex error:", e)
+        raise ValueError(f"Invalid regex pattern '{args.right}': {e}")
+RegexEqualsOperator = Operator(
+    name="regex_equals",
+    runner=regex_equals_operator_runner
+)
+
 def get_field_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
     parser = ArgumentParser()
     parser.add_arg(str, "field_name")
@@ -495,13 +522,168 @@ CountOperator = Operator(
     runner=count_operator_runner
 )
 
+def describe_operator_runner(context: QueryPrimitive, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser()
+    parser.validate_context(is_valid_primitive)
+    parser.parse(context, arguments, all_data)
+    
+    debug("starting describe operation")
+    debug("context:", context)
+    debug("context type:", type(context).__name__)
+    
+    # If input is not an ObjectList, just return str() representation
+    if not isinstance(context, ObjectList):
+        debug("context is not ObjectList, returning str representation")
+        result = str(context)
+        debug("str result:", result)
+        return result
+    
+    # Handle ObjectList input
+    debug("context is ObjectList with", len(context.objects), "objects")
+    
+    if len(context.objects) == 0:
+        return "Empty ObjectList"
+    
+    # Collect basic statistics
+    total_count = len(context.objects)
+    types = set()
+    sources = set()
+    
+    # Analyze each object to collect types, sources, and properties
+    type_properties = {}  # type -> set of properties
+    type_sources = {}     # type -> set of sources
+    
+    for obj in context.objects:
+        obj_types = obj.types  # This is a list of types
+        obj_source = obj.source
+        
+        # Add all types from this object
+        for obj_type in obj_types:
+            types.add(obj_type)
+            
+            # Track properties for this type
+            if obj_type not in type_properties:
+                type_properties[obj_type] = set()
+                type_sources[obj_type] = set()
+            
+            type_sources[obj_type].add(obj_source)
+            
+            # Collect all properties from this object
+            for prop_name in obj.properties.keys():
+                type_properties[obj_type].add(prop_name)
+        
+        sources.add(obj_source)
+    
+    # Build description string
+    description_parts = []
+    description_parts.append(f"ObjectList with {total_count} objects")
+    
+    if len(types) > 0:
+        types_str = ", ".join(sorted(types))
+        description_parts.append(f"Types: {types_str}")
+    
+    if len(sources) > 0:
+        sources_str = ", ".join(sorted(sources))
+        description_parts.append(f"Sources: {sources_str}")
+    
+    # Add schema information for each type
+    for obj_type in sorted(types):
+        type_count = sum(1 for obj in context.objects if obj_type in obj.types)
+        type_sources_list = sorted(type_sources[obj_type])
+        properties_list = sorted(type_properties[obj_type])
+        
+        type_info = f"\n  {obj_type} ({type_count} objects)"
+        if type_sources_list:
+            type_info += f" from sources: {', '.join(type_sources_list)}"
+        
+        if properties_list:
+            type_info += f"\n    Properties: {', '.join(properties_list)}"
+        else:
+            type_info += "\n    No properties"
+        
+        description_parts.append(type_info)
+    
+    result = "\n".join(description_parts)
+    debug("describe result:", result)
+    return result
+DescribeOperator = Operator(
+    name="describe",
+    runner=describe_operator_runner
+)
+
+def slice_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    # Validate context is ObjectList
+    if not isinstance(context, ObjectList):
+        raise TypeError(f"Expected context to be an ObjectList, got {type(context)}: {context}")
+    
+    debug("starting slice operation")
+    debug("context has", len(context.objects), "objects")
+    debug("arguments:", arguments)
+    
+    # Get the objects list
+    objects = context.objects
+    
+    # Handle arguments manually to support None values
+    start = None
+    end = None
+    step = None
+    
+    if len(arguments) > 0 and arguments[0] is not None:
+        start = int(arguments[0])
+    if len(arguments) > 1 and arguments[1] is not None:
+        end = int(arguments[1])
+    if len(arguments) > 2 and arguments[2] is not None:
+        step = int(arguments[2])
+    
+    debug("start:", start)
+    debug("end:", end)
+    debug("step:", step)
+    
+    # Handle None values (Python slice behavior)
+    if step is None or step > 0:
+        start = start if start is not None else 0
+        end = end if end is not None else len(objects)
+        step = step if step is not None else 1
+    else:
+        # For negative step, None values have different defaults
+        start = start if start is not None else len(objects) - 1
+        end = end if end is not None else None  # None means "go to beginning"
+        step = step
+    
+    debug("resolved start:", start)
+    debug("resolved end:", end)
+    debug("resolved step:", step)
+    
+    # Validate step
+    if step == 0:
+        raise ValueError("slice step cannot be zero")
+    
+    # Just use Python's built-in slice behavior
+    try:
+        result_objects = objects[start:end:step]
+    except (ValueError, TypeError) as e:
+        # Handle any edge cases
+        debug("slice error:", e)
+        result_objects = []
+    
+    debug("slice result has", len(result_objects), "objects")
+    return ObjectList(result_objects)
+
+SliceOperator = Operator(
+    name="slice",
+    runner=slice_operator_runner
+)
+
 all_operators = [
     EqualsOperator,
+    RegexEqualsOperator,
     GetFieldOperator,
     FilterOperator,
     SelectOperator,
     IncludesOperator,
     FlattenOperator,
     UniqueOperator,
-    CountOperator
+    CountOperator,
+    DescribeOperator,
+    SliceOperator
 ]
