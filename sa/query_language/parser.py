@@ -29,6 +29,28 @@ def get_tokens_from_query(query: str) -> Tokens:
     
     return tokens
 
+def accumulate_identifier_tokens(tokens: Tokens, start_index: int) -> tuple[str, int]:
+    """Accumulate consecutive tokens that are alphanumeric, underscore, or dash.
+
+    Returns the joined identifier string and the index after the last consumed token.
+    """
+    scan_index = start_index
+    accumulated_tokens: list[str] = []
+    while scan_index < len(tokens):
+        next_token = tokens[scan_index]
+        if next_token == "-":
+            accumulated_tokens.append(next_token)
+            scan_index += 1
+            continue
+        if next_token and all(ch.isalnum() or ch == '_' for ch in next_token):
+            accumulated_tokens.append(next_token)
+            scan_index += 1
+            continue
+        break
+
+    assert len(accumulated_tokens) > 0, f"Expected identifier at index {start_index}"
+    return ''.join(accumulated_tokens), scan_index
+
 def get_token_arguments(tokens: Tokens, current_token_index: int, paren_open: str, paren_close: str, argument_separator: Optional[str]) -> tuple[Tokens, int]:
     assert tokens[current_token_index] == paren_open, f"Expected {paren_open} at index {current_token_index}, got {tokens[current_token_index]}"
     current_token_index += 1
@@ -204,23 +226,27 @@ def parse_tokens_into_querytype(tokens: Tokens) -> QueryType:
                 current_token_index = close_paren_index + 1
             elif token == "#":
                 # #<id> is shorthand for [.__id__ == <id>]
+                accumulated_id, scan_index = accumulate_identifier_tokens(tokens, current_token_index + 1)
                 results.append(parse_tokens_into_querytype(get_tokens_from_query(
-                    f"[.__id__ == '{token_after}']"
+                    f"[.__id__ == '{accumulated_id}']"
                 )).operator_nodes[0])
-                current_token_index += 2
+                current_token_index = scan_index
             elif token == "@":
                 # @<source> is shorthand for [.__source__ == <source>]
+                accumulated_source, scan_index = accumulate_identifier_tokens(tokens, current_token_index + 1)
                 results.append(parse_tokens_into_querytype(get_tokens_from_query(
-                    f"[.__source__ == '{token_after}' | 'all']"
+                    f"[.__source__ == '{accumulated_source}' | 'all']"
                 )).operator_nodes[0])
-                current_token_index += 2
+                current_token_index = scan_index
             else:
                 assert current_token_index == 0, f"Can only do syntax-free shorthand type filtering at the beginning, got {token} at index {current_token_index}"
+                # Accumulate type tokens to support hyphenated types
+                accumulated_type, scan_index = accumulate_identifier_tokens(tokens, current_token_index)
                 # Is shorthand for .filter(.get_field("__types__").includes(token))
                 results.append(parse_tokens_into_querytype(get_tokens_from_query(
-                    f"[.__types__.includes('{token}')]"
+                    f"[.__types__.includes('{accumulated_type}')]"
                 )).operator_nodes[0])
-                current_token_index += 1
+                current_token_index = scan_index
         elif current_state == 'after_dot':
             if token_after == "(":
                 operator = next((op for op in all_operators if op.name == token), None)
