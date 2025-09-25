@@ -126,7 +126,7 @@ Examples:
   %(prog)s -v ".filter(.equals(.get_field('salary'), 75000))"  # Run query with verbose output
   %(prog)s --debug ".equals(.get_field('name'), 'John')"  # Run query with debug output
   %(prog)s --print-profiling-information ".equals(.get_field('name'), 'John')"  # Run query with profiling output
-  %(prog)s --update                          # Run ~/.sa/sa-installer and exit
+  %(prog)s --update                          # Update SA to latest version from GitHub
         """
     )
     parser.add_argument(
@@ -157,7 +157,7 @@ Examples:
     parser.add_argument(
         '--update',
         action='store_true',
-        help='Run ~/.sa/sa-installer and exit'
+        help='Update SA to the latest version from GitHub'
     )
     
     args = parser.parse_args()
@@ -165,15 +165,32 @@ Examples:
     # Handle update command
     if args.update:
         import subprocess
-        import os
-        installer_path = os.path.expanduser("~/.sa/sa-installer")
-        if os.path.exists(installer_path):
-            print("🔄 Running sa-installer...")
-            subprocess.run([installer_path], check=True)
+        import sys
+        
+        print("🔄 Updating SA to the latest version from GitHub...")
+        print("📦 Running: pip install --upgrade git+https://github.com/sebitommy123/SA.git")
+        
+        try:
+            # Run pip install to update from GitHub
+            result = subprocess.run([
+                sys.executable, "-m", "pip", "install", "--upgrade", 
+                "git+https://github.com/sebitommy123/SA.git"
+            ], check=True, capture_output=True, text=True)
+            
             print("✅ Update completed successfully!")
-        else:
-            print(f"❌ Error: Installer not found at {installer_path}")
+            print("🚀 You can now use the latest version of SA")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Error updating SA: {e}")
+            if e.stdout:
+                print(f"stdout: {e.stdout}")
+            if e.stderr:
+                print(f"stderr: {e.stderr}")
             sys.exit(1)
+        except Exception as e:
+            print(f"❌ Unexpected error during update: {e}")
+            sys.exit(1)
+        
         return
     
     # If a query is provided, run in non-interactive mode

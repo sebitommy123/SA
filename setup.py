@@ -38,4 +38,10 @@ setup(
             "mypy>=0.800",
         ],
     },
+    entry_points={
+        "console_scripts": [
+            "sa-shell=sa.shell.shell:main",
+            "sa-query=sa.shell.shell:main",
+        ],
+    },
 ) 
