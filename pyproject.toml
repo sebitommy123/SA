@@ -7,14 +7,14 @@ name = "sa"
 version = "0.1.0"
 description = "Semantic Analysis Framework for generic JSON objects"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "Custom License - Use allowed, redistribution prohibited"}
 authors = [
-    {name = "Sebi"}
+    {name = "Sebastiaan Szafir"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",

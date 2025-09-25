@@ -9,17 +9,20 @@ import readline
 import sys
 import argparse
 
+from sa.core.object_list import ObjectList
+from sa.core.object_grouping import ObjectGrouping
 from sa.query_language.execute import execute_query
-from sa.query_language.parser import parse_tokens_into_querytype, get_tokens_from_query
-from sa.query_language.render import render_object_list
+from sa.query_language.render import render_object_as_group, render_object_list
 from sa.shell.provider_manager import load_providers, list_providers, fetch_all_providers
-from sa.query_language.main import Chain
+from sa.query_language.chain import Chain
 import traceback
+
+VERSION = 22
 
 def print_header():
     """Print the shell header with nice formatting."""
     print("╔══════════════════════════════════════════════════════════════╗")
-    print("║                    SA Query Language Shell                  ║")
+    print(f"║                    SA Query Language Shell v{VERSION}                 ║")
     print("║                                                              ║")
     print("║  Type 'quit', 'exit', or 'q' to exit                        ║")
     print("║  Type 'help' for available commands                         ║")
@@ -51,7 +54,7 @@ def execute_query_shell(query: str, context):
 
 def format_result(result, show_count: bool = True):
     """Format a query result for display."""
-    if hasattr(result, 'objects'):
+    if isinstance(result, ObjectList):
         # It's an ObjectList
         if len(result.objects) == 0:
             return "No objects found"
@@ -59,6 +62,8 @@ def format_result(result, show_count: bool = True):
             output = f"Found {len(result.objects)} object(s):\n" if show_count else ""
             output += render_object_list(result)
             return output
+    elif isinstance(result, ObjectGrouping):
+        return render_object_as_group(result)
     elif isinstance(result, bool):
         return str(result)
     elif isinstance(result, (list, tuple)):
@@ -86,7 +91,7 @@ def load_and_fetch_data(verbose: bool = False, quiet: bool = False):
     return all_data
 
 
-def run_non_interactive(query: str, verbose: bool = False, quiet: bool = False, debug: bool = False):
+def run_non_interactive(query: str, verbose: bool = False, quiet: bool = False, debug: bool = False, profiling: bool = False):
     """Run a single query in non-interactive mode."""
     all_data = load_and_fetch_data(verbose, quiet)
     
@@ -94,6 +99,11 @@ def run_non_interactive(query: str, verbose: bool = False, quiet: bool = False, 
     if debug:
         import sa.query_language.operators
         sa.query_language.operators.DEBUG_ENABLED = True
+    
+    # Set profiling mode globally if requested
+    if profiling:
+        import sa.query_language.operators
+        sa.query_language.operators.PROFILING_ENABLED = True
     
     result, error = execute_query_shell(query, all_data)
     
@@ -115,6 +125,8 @@ Examples:
   %(prog)s -q ".get_field('department')"     # Run query quietly
   %(prog)s -v ".filter(.equals(.get_field('salary'), 75000))"  # Run query with verbose output
   %(prog)s --debug ".equals(.get_field('name'), 'John')"  # Run query with debug output
+  %(prog)s --print-profiling-information ".equals(.get_field('name'), 'John')"  # Run query with profiling output
+  %(prog)s --update                          # Run ~/.sa/sa-installer and exit
         """
     )
     parser.add_argument(
@@ -137,20 +149,44 @@ Examples:
         action='store_true',
         help='Enable debug output for operators'
     )
+    parser.add_argument(
+        '--print-profiling-information',
+        action='store_true',
+        help='Print timing information for each operation in the query'
+    )
+    parser.add_argument(
+        '--update',
+        action='store_true',
+        help='Run ~/.sa/sa-installer and exit'
+    )
     
     args = parser.parse_args()
+    
+    # Handle update command
+    if args.update:
+        import subprocess
+        import os
+        installer_path = os.path.expanduser("~/.sa/sa-installer")
+        if os.path.exists(installer_path):
+            print("🔄 Running sa-installer...")
+            subprocess.run([installer_path], check=True)
+            print("✅ Update completed successfully!")
+        else:
+            print(f"❌ Error: Installer not found at {installer_path}")
+            sys.exit(1)
+        return
     
     # If a query is provided, run in non-interactive mode
     if args.query:
         verbose = args.verbose and not args.quiet
-        run_non_interactive(args.query, verbose, args.quiet, args.debug)
+        run_non_interactive(args.query, verbose, args.quiet, args.debug, args.print_profiling_information)
         return
     
     # Otherwise, start interactive shell
-    run_interactive_shell(args.debug)
+    run_interactive_shell(args.debug, args.print_profiling_information)
 
 
-def run_interactive_shell(debug: bool = False):
+def run_interactive_shell(debug: bool = False, profiling: bool = False):
     """Run the interactive shell loop."""
     print_header()
     
@@ -171,6 +207,13 @@ def run_interactive_shell(debug: bool = False):
         import sa.query_language.operators
         sa.query_language.operators.DEBUG_ENABLED = True
         print("🐛 Debug mode enabled")
+        print()
+    
+    # Set profiling mode if requested
+    if profiling:
+        import sa.query_language.operators
+        sa.query_language.operators.PROFILING_ENABLED = True
+        print("⏱️  Profiling mode enabled")
         print()
     
     # Main shell loop
@@ -194,6 +237,7 @@ def run_interactive_shell(debug: bool = False):
                 print("  help     - Show this help message")
                 print("  refresh  - Reload data from all providers")
                 print("  debug    - Toggle debug mode on/off")
+                print("  profile  - Toggle profiling mode on/off")
                 print("  quit     - Exit the shell")
                 print("  exit     - Exit the shell")
                 print("  q        - Exit the shell")
@@ -223,6 +267,15 @@ def run_interactive_shell(debug: bool = False):
                 sa.query_language.operators.DEBUG_ENABLED = not sa.query_language.operators.DEBUG_ENABLED
                 status = "enabled" if sa.query_language.operators.DEBUG_ENABLED else "disabled"
                 print(f"\n🐛 Debug mode {status}")
+                print()
+                continue
+            
+            # Check for profile command
+            if user_input.lower() == 'profile':
+                import sa.query_language.operators
+                sa.query_language.operators.PROFILING_ENABLED = not sa.query_language.operators.PROFILING_ENABLED
+                status = "enabled" if sa.query_language.operators.PROFILING_ENABLED else "disabled"
+                print(f"\n⏱️  Profiling mode {status}")
                 print()
                 continue
             

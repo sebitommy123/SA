@@ -1,39 +1,17 @@
 from __future__ import annotations
 from abc import ABC
+from ast import List
 from dataclasses import dataclass
 from typing import Union, TYPE_CHECKING, Optional
 import datetime
 
+from sa.query_language.errors import QueryError
 from sa.core.sa_types import SATypeCustom, resolve_primitive_recursively
 
 from .types import SATypePrimitive, SAType
 
 if TYPE_CHECKING:
-    from sa.query_language.main import ObjectList
-    from sa.query_language.parser import QueryType, Chain
-    from sa.query_language.operators import GetFieldOperator
-    from sa.query_language.execute import execute_query
-    from sa.query_language.parser import get_tokens_from_query, parse_tokens_into_querytype
-
-def is_valid_sa_type_primitive(t: any) -> bool:
-    if isinstance(t, str) or isinstance(t, int) or isinstance(t, bool) or isinstance(t, float):
-        return True
-    if isinstance(t, list):
-        return all(is_valid_sa_type(i) for i in t)
-    if isinstance(t, dict):
-        return all(is_valid_sa_type(i) for i in t.values())
-    if t is None:
-        return True
-    return False
-
-def is_valid_sa_type(t: any) -> bool:
-    if is_valid_sa_type_primitive(t):
-        return True
-    # Import here to avoid circular import issues
-    from sa.core.sa_types import SATypeCustom
-    if isinstance(t, SATypeCustom):
-        return True
-    return False
+    from sa.core.object_list import ObjectList
 
 @dataclass
 class SAObject:

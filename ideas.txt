@@ -1,0 +1,204 @@
+
+HIGH PRIO
+
+Put on github
+
+Source selector doesn't work anymore, because it can't break up ObjectGroupings
+    This dies: python -m sa.shell.shell ".map(@source_A.lol)"
+
+This dies:
+    python -m sa.shell.shell ".map(.salary == .manager)"
+
+XML custom type
+
+Lazy loading
+ * trades
+    - by timestamp, max 2 seconds worth
+ * network switches + interfaces + FPGAs
+    - basically lazy loaded links, whenever you access it, it queries for more data
+ * info decodes
+    - by timestamp, similar to trades
+ * exec decodes
+    - by timestamp, similar to trades
+ * pcaps
+    - unclear
+ * config-intent XML
+    - unclear
+ * history
+    - basically a lazy-loaded link, but you have to specify a time range, which can only be so large depending on what it is
+    - .history() -> which actually just lazy loads a field
+ * extra host info (part of the object is lazy-loaded)
+ * instruments
+ * IBs
+ * logs
+
+I don't want to have to give people saps.txt files, should have a registry
+
+comparing Link types with == is broken
+    need a way of debugging links
+
+lists of Objects need to be turned into ObjectLists
+
+named contexts
+
+
+MID PRIO
+
+Foreach operator {}
+
+Annotations for objects and fields.
+
+aliases, including aliases that become whole queries and aliases that can take in arguments
+e.g. map_port AA -> [.port == 'AA'] using a simple template
+
+Takes too long to downlosd data from SAPs
+
+sa-shell should store data so opening it is fast and it refreshes in background
+
+test mode for SAPs so it returns output and doesn't start the server
+
+AND and OR don't work yet bc of operator precedence not being a thing
+ 1. Should also add ()
+
+ a way to list all providers and exposed sources
+
+
+LOW PRIO
+
+Context-less functions should not have a dot "." at the beginning. These functions feed context straight through to their arguments. E.g. equals() feels wrong to type with a "." for a good reason.
+
+Better indexing, not hardcoded to types and Ids. Have to give it more thought.
+    Needs to be able to be copied to new ObjectLists after filtering or selecting, etc...
+
+autocomplete / suggest
+
+an optimization: query caching, so if you run the same thing twice, it remembers the result. Or if you run A, it remembers it so A.B runs fast
+
+notion of data "age"
+
+concat object lists, "+" works
+
+more operators: >< .any(), .counts() -> count of each thing in list
+
+perhaps should be powered by Pandas for C acceleration?
+
+
+
+
+
+
+--------
+Some shits going down here
+host#<application[.enabled == "Disabled"].host_name>
+this creates a new query for each result of the previous query, and returns a new object list
+which I think should be equivalent to
+application[.enabled == "Disabled"].host_name.replace_each(host#<>)
+but {} is kinda our syntax for replace each so
+application[.enabled == "Disabled"].host_name{host#<>)
+to preserve the app, you could do
+application[.enabled == "Disabled"]{.host_name.replace(host#<>)}
+
+application{APP => .host_name = *host[.name == APP.host_name]}
+equivalent to
+application{APP => APP.host_name = *host[.name == APP.host_name]}
+
+
+EXAMPLE:
+get apps with the same id as their hosts
+app[host[.apps.includes("lol")].name == .name]
+
+maybe instead of passing down "all_data", there should be a first-class concept of "context-stack"
+    that is, every time a function mutates the context, it actually just gets added to the stack:
+        when a function returns something in a chain, if there is something after it in the chain, the return value will be added to the context stack. all functions then just use the latest thing in the context stack by default.
+        when a function executes a chain passed in as an argument, passing in custom context, it also just adds the custom context to the stack and passes in the stack.
+    then, .pop_context(n) (special operator) can be used to pop a certain number of contexts during a chain. the shorthand is *, which calls .pop_context(-1), popping all the way back to all_data. you can then also do *[-1] which calls .pop_context(1), etc... 
+        for example app[#host_01.name == .name]
+            this won't work because #lol will execute on just the app, returning nothing.
+            instead: app[*#lol.name == .name]
+                this runs #lol on all_data
+        for example app#mds_01.host.apps[.core == *[-2].sys_core]
+            this will probably grab the host in *[-2]
+        ofc this syntax is super ugly and basically useless, so probably I should only support a named context stack. i.e. we only keep the contexts you name
+        for example app#mds_01.host=>HOST.apps[.core == HOST.sys_core]
+            so this way, the context_stack just has "*" by default, and then other capitalized saved contexts
+            the => operator is a special operator .add_context_to_stack("HOST") which adds to the stack
+        for example app[host[HOST => .apps.includes(HOST.name)].name == .name]
+            this is an example of naming the context in operators that craft new syntax (the filter operator literally picks what context what to pass into the arg operator, but will also pass the context_stack with the extra named argument if you choose to)
+        NEW IDEA
+            operators now only take in context_stack (and arguments ofc), no context, no all_data
+            then the context_stack always has:
+                all_data (returns the original complete object list)
+                current_context (returns the latest object list, likely created by the previous operator in the chain)
+                named_contexts (a dict of name => context)
+                ONLY named_contexts is editable (add-only) via a .add_named_context() method. everything else is read-only
+            what operators return always becomes the current_context if in a chain
+                the return is usually just used as the context by the next operator
+                sometimes if an operator is directly running this other operator (e.g. filter), it can use that return value directly
+            then, there's the .add_named_context(name) operator
+                which just adds to named_contexts the current_context with the name
+            and there's the .get_named_context(name) operator
+                which just returns the named context! which ofc then becomes the current_context if in a chain :)
+        
+            
+        
+            
+
+-------
+SELECT operator overhaul
+which can also be a MAP now
+
+ 1. Grab a set of fields from all objects, keep only those alongside id/type/source still there
+ 2. Replace each object with the result of a expression ran on the object
+ 3. Replace each object's attribute with the result of a expression
+
+SELECT mode:
+    app[["name", "host"]]
+
+FOREACH mode:
+    app{.name = "lol", .neighbors = .host.apps.count()}
+
+MAP mode:
+    app.map(.name)
+
+Supports named context ofc
+application{APP => APP.host_name = *host[.name == APP.host_name]}
+
+
+
+
+
+
+----------------------
+XML
+#sphr_exec_sessions.children[.name == "Sessions"][0].children[.name == "Market"][0].value
+#sphr_exec_sessions.children[.name == "Sessions"][0].children[.name == "MiaxPurgeIds"][0].children[.name == "MiaxPurgeId"][[.attr_name, .attr_purgeSessionId]]
+
+all children's names exposed as a link to it, will be omitted if there's multiple
+all attributes also exposed as links, higher presedence to children names
+you can use the [] syntax of XML node objects and it will implicitly call .children
+
+.Sessions.Market
+	-> .children[.name == "Sessions"][0].children[.name == "Market"][0]
+
+.Sessions.MiaxPurgeIds.MiaxPurgeId
+	-> Doesn't work bc multiple MiaxPurgeId
+
+.Sessions.MiaxPurgeIds[[.name, .purgeSessionId]]
+
+
+.Sessions.Market
+
+.Sessions.Market
+.Sessions.MiaxPurgeIds.MiaxPurgeId[0]
+
+
+.ProductUnderlyingMappingsConfiguration.ProductUnderlyingMappings[.underlying == "TFC"][0].products
+
+need a shorthand for [.underlying == "TFC"], it's still too long. maybe I should just be able to omit the ""
+
+Also I do still believe that the get_field "." operator should honestly be able to deal with lists that have just 1 element in it by automatically unwrapping them.
+
+That way it becomes:
+#product_underlying_mappings.ProductUnderlyingMappingsConfiguration.ProductUnderlyingMappings[.underlying == TFC].products
+
+Also these files should be lazy loaded, which requires solving figuring out which SAP to hit given an id

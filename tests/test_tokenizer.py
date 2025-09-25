@@ -3,7 +3,7 @@
 Test the get_tokens_from_query function to ensure it works correctly.
 """
 
-from sa.query_language.main import get_tokens_from_query
+from sa.query_language.parser import get_tokens_from_query
 
 def test_tokenizer():
     """Test various query inputs to ensure proper tokenization."""

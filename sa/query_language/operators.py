@@ -3,36 +3,25 @@ from typing import Callable, Any, TYPE_CHECKING, Optional, List, Type, Union
 import re
 
 if TYPE_CHECKING:
-    from sa.query_language.main import QueryType, Arguments, ObjectList, Operator, OperatorNode, QueryPrimitive, Chain, is_valid_primitive
+    from sa.query_language.types import QueryType, Arguments, QueryContext
+    from sa.query_language.chain import Operator, OperatorNode, Chain
+    from sa.core.object_list import ObjectList
+    from sa.query_language.validators import is_valid_primitive
 
-from sa.query_language.object_list import ObjectList
-from sa.core.sa_object import SAObject, SAType, is_valid_sa_type
-from sa.query_language.main import Operator, QueryType, Arguments, QueryPrimitive, Chain, is_valid_primitive
+from sa.query_language.validators import anything, either, is_absorbing_none, is_dict, is_list, is_object_grouping, is_object_list, is_single_object_list
+from sa.query_language.errors import QueryError
+from sa.core.object_list import ObjectList
+from sa.core.sa_object import SAObject
+from sa.core.object_grouping import ObjectGrouping
+from sa.core.types import SAType
+from sa.core.types import is_valid_sa_type
+from sa.query_language.types import AbsorbingNone, AbsorbingNoneType, QueryType, Arguments, QueryContext
+from sa.query_language.chain import Operator, Chain
+from sa.query_language.validators import is_valid_primitive, is_valid_querytype
 from dataclasses import dataclass
-import inspect
 
-# Global debug flag that can be controlled from the shell
 DEBUG_ENABLED = False
-
-def debug(*args):
-    """Debug function that automatically prefixes messages with the calling function name."""
-    if not DEBUG_ENABLED:
-        return
-        
-    # Get the calling function name
-    caller_frame = inspect.currentframe().f_back
-    if caller_frame:
-        caller_name = caller_frame.f_code.co_name
-        # Clean up the function name to be more readable
-        if caller_name.endswith('_operator_runner'):
-            caller_name = caller_name.replace('_operator_runner', ' operator runner')
-        elif caller_name.endswith('_runner'):
-            caller_name = caller_name.replace('_runner', ' runner')
-        
-        # Print with prefix
-        print(f"[{caller_name}]", *args)
-    else:
-        print("[unknown]", *args)
+PROFILING_ENABLED = False
 
 class ParsedArguments:
     """Container for parsed and validated arguments."""
@@ -74,136 +63,62 @@ class ParsedArguments:
 class ArgumentParser:
     """Parser for validating operator arguments with a fluent builder API."""
     
-    def __init__(self):
+    def __init__(self, operator_name: str):
+        self.operator_name = operator_name
         self.argument_specs = []
-        self.allow_variable = False
-        self.min_count = 0
-        self.max_count = None
         self.context_spec = None
     
-    def allow_variable_args(self, min_count: int = 0, max_count: Optional[int] = None):
-        """Allow variable number of arguments."""
-        self.allow_variable = True
-        self.min_count = min_count
-        self.max_count = max_count
-        return self
-    
-    def validate_context(self, type_or_validator: Union[Type, Callable]):
+    def validate_context(self, type_or_validator: Union[Type, Callable], description: str):
         if isinstance(type_or_validator, type):
-            self.context_spec = {
-                "type": type_or_validator,
-                "validator": None
-            }
-        else:
-            self.context_spec = {
-                "type": None,
-                "validator": type_or_validator
-            }
-        return self
+            type_or_validator = lambda x: isinstance(x, type_or_validator)
+            description = f"{self.operator_name} operates on {type_or_validator.__name__}"
+        self.context_spec = {
+            "validator": either(type_or_validator, is_absorbing_none),
+            "description": description
+        }
     
-    def add_arg(self, type_or_validator: Union[Type, Callable], name: str, required: bool = True):
-        """Add an argument specification. Can pass either a type or a validator function."""
-        # Determine if it's a type or validator function
+    def dont_validate_context(self):
+        self.validate_context(lambda x: True, "Context is not validated")
+    
+    def add_arg(self, type_or_validator: Union[Type, Callable], name: str, description: str):
         if isinstance(type_or_validator, type):
-            expected_type = type_or_validator
-            validator = None
-        else:
-            expected_type = None
-            validator = type_or_validator
-        
+            original_type = type_or_validator
+            type_or_validator = lambda x: isinstance(x, original_type)
+            description = f"Expected argument {name} to be of type {original_type.__name__}"
+
         self.argument_specs.append({
-            'type': expected_type,
+            'validator': either(type_or_validator, is_absorbing_none),
             'name': name,
-            'required': required,
-            'validator': validator
+            'description': description
         })
         return self
     
-    def parse(self, context: QueryPrimitive, arguments: Arguments, all_data: ObjectList) -> ParsedArguments:
-        """Parse and validate arguments according to the specifications."""
-        # Process arguments: run chains if expected type isn't Chain but argument is Chain
+    def parse(self, context: QueryContext, arguments: Arguments, all_data: ObjectList) -> ParsedArguments:
+        assert self.context_spec is not None, f"{self.operator_name} operator must validate context"
+        if not self.context_spec['validator'](context):
+            raise QueryError(f"{self.operator_name} operator can't operate on {type(context).__name__}. {self.context_spec['description']}")
 
-        if self.context_spec is not None:
-            if self.context_spec['type'] is not None:
-                if not isinstance(context, self.context_spec['type']):
-                    raise TypeError(f"Expected context to be of type {self.context_spec['type'].__name__}, got {type(context).__name__}: {context}")
-            if self.context_spec['validator'] is not None:
-                if not self.context_spec['validator'](context):
-                    raise TypeError(f"Context failed validation: {context}")
-        else:
-            if not isinstance(context, ObjectList):
-                raise TypeError(f"Expected context to be an ObjectList, got {type(context)}: {context}")
-
-        processed_args = []
-        for i, arg in enumerate(arguments):
-            if i < len(self.argument_specs):
-                spec = self.argument_specs[i]
-                expected_type = spec['type']
-                
-                # If we expect something other than Chain but got a Chain, run it
-                if expected_type != Chain and isinstance(arg, Chain):
-                    processed_arg = arg.run(context, all_data)
-                    processed_args.append(processed_arg)
-                else:
-                    processed_args.append(arg)
-            else:
-                processed_args.append(arg)
+        if len(self.argument_specs) != len(arguments):
+            raise QueryError(f"{self.operator_name} operator expects {len(self.argument_specs)} arguments, got {len(arguments)}: {arguments}")
         
-        if self.allow_variable:
-            # Handle variable arguments
-            if len(processed_args) < self.min_count:
-                raise ValueError(f"Expected at least {self.min_count} arguments, got {len(processed_args)}: {processed_args}")
-            if self.max_count is not None and len(processed_args) > self.max_count:
-                raise ValueError(f"Expected at most {self.max_count} arguments, got {len(processed_args)}: {processed_args}")
+        # Run any chains if the validator doesn't like them
+        def run_chain_if_fails_validator(arg, spec):
+            if not spec['validator'](arg) and isinstance(arg, Chain):
+                return arg.run(context, all_data)
+            return arg
+        processed_args = [run_chain_if_fails_validator(arg, spec) for arg, spec in zip(arguments, self.argument_specs)]
+        
+        # Build result object
+        result_kwargs = {}
+        for i, spec in enumerate(self.argument_specs):
+            arg = processed_args[i]
+            if not spec['validator'](arg):
+                raise QueryError(f"{self.operator_name} operator, argument '{spec['name']}' can't be {type(arg).__name__}. {spec['description']}")
+            result_kwargs[spec['name']] = arg
             
-            # Validate each argument using the first spec (assuming all args have same type/validator)
-            if self.argument_specs:
-                spec = self.argument_specs[0]
-                for i, arg in enumerate(processed_args):
-                    if spec['validator'] is not None:
-                        if not spec['validator'](arg):
-                            raise TypeError(f"Argument {i} failed validation: {arg}")
-                    elif spec['type'] is not None:
-                        if not isinstance(arg, spec['type']):
-                            raise TypeError(f"Argument {i} must be of type {spec['type'].__name__}, got {type(arg).__name__}: {arg}")
-            
-            # Build result with positional arguments
-            result_kwargs = {}
-            for i, arg in enumerate(processed_args):
-                result_kwargs[f'arg_{i}'] = arg
-            return ParsedArguments(**result_kwargs)
-        else:
-            # Handle fixed arguments
-            expected_count = len([spec for spec in self.argument_specs if spec['required']])
-            if len(processed_args) < expected_count:
-                raise ValueError(f"Expected at least {expected_count} arguments, got {len(processed_args)}: {processed_args}")
-            if len(processed_args) > len(self.argument_specs):
-                raise ValueError(f"Expected at most {len(self.argument_specs)} arguments, got {len(processed_args)}: {processed_args}")
-            
-            # Build result object
-            result_kwargs = {}
-            for i, spec in enumerate(self.argument_specs):
-                if i < len(processed_args):
-                    arg = processed_args[i]
-                    # Validate using validator if provided, otherwise use type
-                    if spec['validator'] is not None:
-                        if not spec['validator'](arg):
-                            raise TypeError(f"Argument '{spec['name']}' failed validation: {arg}")
-                    elif spec['type'] is not None:
-                        if not isinstance(arg, spec['type']):
-                            raise TypeError(f"Argument '{spec['name']}' must be of type {spec['type'].__name__}, got {type(arg).__name__}: {arg}")
-                    result_kwargs[spec['name']] = arg
-                else:
-                    # Handle optional arguments that weren't provided
-                    if not spec['required']:
-                        result_kwargs[spec['name']] = None
-                    else:
-                        # This shouldn't happen due to the count check above, but just in case
-                        raise ValueError(f"Missing required argument '{spec['name']}'")
-            
-            return ParsedArguments(**result_kwargs)
+        return ParsedArguments(**result_kwargs)
 
-def run_all_if_possible(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> list[QueryPrimitive]:
+def run_all_if_possible(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> list[QueryType]:
     result = []
     for arg in arguments:
         if isinstance(arg, Chain):
@@ -214,36 +129,20 @@ def run_all_if_possible(context: ObjectList, arguments: Arguments, all_data: Obj
             result.append(arg)
     return result
 
-def deduplicate_if_list(item: SAType) -> Optional[SAType]:
-    assert is_valid_sa_type(item), f"deduplicate_if_list item must be a valid SA type, got {type(item)}: {item}"
-    if isinstance(item, list):
-        if len(set(item)) != 1:
-            return None
-        return item[0]
-    return item
-
 def equals_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
-    parser.add_arg(is_valid_sa_type, "left")
-    parser.add_arg(is_valid_sa_type, "right")
+    parser = ArgumentParser("equals")
+    parser.validate_context(anything, "")
+    parser.add_arg(is_valid_sa_type, "left", "Left side of equals must be a valid SA type")
+    parser.add_arg(is_valid_sa_type, "right", "Right side of equals must be a valid SA type")
     args = parser.parse(context, arguments, all_data)
     
-    debug("context objects count:", len(context.objects))
-    debug("left:", args.left)
-    debug("right:", args.right)
+    left = args.left
+    right = args.right
     
-    left = deduplicate_if_list(args.left)
-    right = deduplicate_if_list(args.right) 
-    
-    debug("deduplicated left:", left)
-    debug("deduplicated right:", right)
-    
-    if left is None or right is None:
-        debug("one or both sides are None, returning False")
-        return False
-    
+    if left is AbsorbingNone or right is AbsorbingNone:
+        return AbsorbingNone
+
     result = left == right
-    debug("comparison result:", result)
     return result
 EqualsOperator = Operator(
     name="equals",
@@ -251,142 +150,273 @@ EqualsOperator = Operator(
 )
 
 def regex_equals_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
-    parser.add_arg(str, "left")
-    parser.add_arg(str, "right")
+    parser = ArgumentParser("regex_equals")
+    parser.add_arg(str, "left", "Left side of regex equals must be a string")
+    parser.add_arg(str, "right", "Right side of regex equals must be a string")
+    parser.validate_context(anything, "")
     args = parser.parse(context, arguments, all_data)
     
-    debug("starting regex equals operation")
-    debug("context objects count:", len(context.objects))
-    debug("left string:", args.left)
-    debug("right regex pattern:", args.right)
+    left = args.left
+
+    if left is AbsorbingNone or args.right is AbsorbingNone:
+        return AbsorbingNone
     
     try:
         # Compile the regex pattern
         pattern = re.compile(args.right)
         # Test if the left string matches the regex pattern
-        result = bool(pattern.search(args.left))
-        debug("regex match result:", result)
+        result = bool(pattern.search(left))
         return result
     except re.error as e:
-        debug("regex error:", e)
-        raise ValueError(f"Invalid regex pattern '{args.right}': {e}")
+        raise QueryError(f"Invalid regex pattern '{args.right}': {e}")
 RegexEqualsOperator = Operator(
     name="regex_equals",
     runner=regex_equals_operator_runner
 )
 
-def get_field_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
-    parser.add_arg(str, "field_name")
+# show_plan operator takes on argument (a chain) and just returns it (doesn't run it)
+def show_plan_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("show_plan")
+    parser.add_arg(Chain, "chain", "The chain to show the plan for")
+    parser.validate_context(anything, "")
+    args = parser.parse(context, arguments, all_data)
+    return args.chain
+ShowPlanOperator = Operator(
+    name="show_plan",
+    runner=show_plan_operator_runner
+)
+
+def and_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("and")
+    parser.add_arg(is_valid_sa_type, "left")
+    parser.add_arg(is_valid_sa_type, "right")
     args = parser.parse(context, arguments, all_data)
     
-    debug("context objects count:", len(context.objects))
-    debug("field name:", args.field_name)
+    left = args.left
+    right = args.right
+    
+    if left is None or right is None:
+        return False
+    
+    result = bool(left) and bool(right)
+    return result
+AndOperator = Operator(
+    name="and",
+    runner=and_operator_runner
+)
+
+def or_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("or")
+    parser.add_arg(is_valid_sa_type, "left")
+    parser.add_arg(is_valid_sa_type, "right")
+    args = parser.parse(context, arguments, all_data)
+    
+    left = args.left
+    right = args.right
+    
+    if left is None or right is None:
+        return False
+    
+    result = bool(left) or bool(right)
+    return result
+OrOperator = Operator(
+    name="or",
+    runner=or_operator_runner
+)
+
+def convert_list_of_sa_objects_to_object_list_if_needed(sa_type: 'SAType') -> 'SAType':
+    if isinstance(sa_type, list):
+        if all(isinstance(obj, SAObject) for obj in sa_type):
+            return ObjectList(sa_type)
+    return sa_type
+
+def to_json_operator_runner(context: QueryType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("to_json")
+    parser.validate_context(is_valid_querytype)
+    parser.parse(context, arguments, all_data)
+    
+    if isinstance(context, SAObject):
+        return context.json
+    elif isinstance(context, ObjectList):
+        return [obj.json for obj in context.objects]
+    else:
+        return context
+ToJsonOperator = Operator(
+    name="to_json",
+    runner=to_json_operator_runner
+)
+
+def get_field_regex_operator_runner(context: QueryType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("get_field_regex")
+    parser.add_arg(str, "field_name")
+    parser.validate_context(either(is_single_object_list, is_object_grouping))
+    args = parser.parse(context, arguments, all_data)
+
+    object_grouping = context if isinstance(context, ObjectGrouping) else context.objects[0]
+    
+    try:
+        # Compile the regex pattern
+        pattern = re.compile(args.field_name)
+    except re.error as e:
+        raise ValueError(f"Invalid regex pattern '{args.field_name}': {e}")
     
     result = []
     for obj in context.objects:
-        if obj.has_field(args.field_name):
-            field_value = obj.get_field(args.field_name, all_data)
-            debug(f"object {obj.id} has field '{args.field_name}':", field_value)
-            result.append(field_value)
-        else:
-            debug(f"object {obj.id} missing field '{args.field_name}'")
+        matching_fields = []
+        for field_name in obj.properties.keys():
+            if pattern.search(field_name):
+                field_value = obj.get_field(field_name, all_data)
+                field_value = convert_list_of_sa_objects_to_object_list_if_needed(field_value)
+                matching_fields.append((field_name, field_value))
+        
+        if matching_fields:
+            # If multiple fields match, return a dict with field names as keys
+            field_dict = {name: value for name, value in matching_fields}
+            result.append(field_dict)
     
-    debug("total results found:", len(result))
-    
+    result = convert_list_of_sa_objects_to_object_list_if_needed(result)
+
     if len(result) == 1:
-        debug("single result, returning:", result[0])
         return result[0]
     if len(result) == 0:
-        debug("no results found, returning None")
         return None
     
-    debug("multiple results, returning list:", result)
     return result
+GetFieldRegexOperator = Operator(
+    name="get_field_regex",
+    runner=get_field_regex_operator_runner
+)
+
+def get_field_operator_runner(context: QueryType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("get_field")
+    parser.add_arg(str, "field_name", "The field to get must be a string.")
+    parser.add_arg(bool, "return_none_if_missing", "Please specify whether to return None if the field is missing.")
+    parser.add_arg(bool, "return_all_values", "Please specify whether to return all values for the field from all sources.")
+    parser.validate_context(either(is_single_object_list, is_object_grouping, is_dict), "You can only use the get_field operator on an individual object or dicts.")
+    args = parser.parse(context, arguments, all_data)
+
+    if isinstance(context, dict):
+        if not args.field_name in context:
+            if args.return_none_if_missing:
+                return AbsorbingNone
+            raise QueryError(f"Field '{args.field_name}' not found in dict: {context}")
+        return context[args.field_name]
+    
+    object_grouping = context if isinstance(context, ObjectGrouping) else context.objects[0]
+
+    if args.return_all_values:
+        return object_grouping.get_all_field_values(args.field_name, all_data)
+
+    if not object_grouping.has_field(args.field_name):
+        if args.return_none_if_missing:
+            return AbsorbingNone
+        raise QueryError(f"Field '{args.field_name}' not found in object: {object_grouping}")
+
+    return object_grouping.get_field(args.field_name, all_data)
 GetFieldOperator = Operator(
     name="get_field",
     runner=get_field_operator_runner
 )
 
-def filter_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
-    parser.add_arg(Chain, "chain")
-    parser.add_arg(str, "mode", required=False)
+def has_field_operator_runner(context: QueryType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("has_field")
+    parser.add_arg(str, "field_name", "The field to check must be a string.")
+    parser.validate_context(either(is_single_object_list, is_object_grouping, is_dict), "You can only use the has_field operator on an individual object or dicts.")
     args = parser.parse(context, arguments, all_data)
     
-    debug("starting filter operation")
-    debug("context has", len(context.objects), "objects")
-    debug("filter chain:", args.chain)
-    debug("filter mode:", args.mode)
-    if args.mode == None or args.mode == "grouped":
-        grouped_context = context.group_by_id_types()
-    elif args.mode == "all":
-        grouped_context = [ObjectList([obj]) for obj in context.objects]
-    debug("grouped context into", len(grouped_context), "groups")
+    if isinstance(context, dict):
+        return args.field_name in context
     
-    survivors: list[SAObject] = []
-    for i, object_list in enumerate(grouped_context):
-        debug(f"processing group {i+1}/{len(grouped_context)} with {len(object_list.objects)} objects")
-        chain_result = args.chain.run(object_list, all_data)
-        debug(f"chain result for group {i+1}:", chain_result)
+    object_grouping = context if isinstance(context, ObjectGrouping) else context.objects[0]
+    
+    return object_grouping.has_field(args.field_name)
+HasFieldOperator = Operator(
+    name="has_field",
+    runner=has_field_operator_runner
+)
+
+
+def filter_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("filter")
+    parser.add_arg(Chain, "chain", "The filtering expression must be able to be evaluated on each object to a boolean.")
+    parser.validate_context(is_object_list, "You can use the filter operator on an ObjectList.")
+    args = parser.parse(context, arguments, all_data)
         
-        assert isinstance(chain_result, bool), f"Filter operator chain result must be a boolean, got {type(chain_result)}: {chain_result}"
+    survivors: list[ObjectGrouping] = []
+    for i, grouped_object in enumerate(context.objects):
+        chain_result = args.chain.run(ObjectList([grouped_object]), all_data)
+
+        if isinstance(chain_result, AbsorbingNoneType):
+            continue
+
+        if not isinstance(chain_result, bool):
+            raise QueryError(f"Filter expression for {grouped_object} result must be a boolean, got {type(chain_result).__name__}: {chain_result}")
+        
         if chain_result:
-            debug(f"group {i+1} passed filter, adding {len(object_list.objects)} objects")
-            survivors.extend(object_list.objects)
-        else:
-            debug(f"group {i+1} failed filter, skipping")
+            survivors.append(grouped_object)
     
-    debug("filter complete, survivors:", len(survivors))
     return ObjectList(survivors)
 FilterOperator = Operator(
     name="filter",
     runner=filter_operator_runner
 )
 
-def select_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
-    parser.allow_variable_args(min_count=1)
-    parser.add_arg(Chain, "chain")  # This spec will be used to validate all arguments
+def foreach_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    raise QueryError("Foreach operator is not implemented yet")
+ForeachOperator = Operator(
+    name="foreach",
+    runner=foreach_operator_runner
+)
+
+def map_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("map")
+    parser.add_arg(Chain, "chain", "The mapping expression must be able to be evaluated on each object to a value.")
+    parser.validate_context(is_object_list, "You can use the map operator on an ObjectList.")
     args = parser.parse(context, arguments, all_data)
     
-    debug("starting select operation")
-    debug("context has", len(context.objects), "objects")
-    debug("select chains count:", len(args))
+    results = [args.chain.run(obj, all_data) for obj in context.objects]
+    results = [res for res in results if not isinstance(res, AbsorbingNoneType)]
+    if len(results) == 0:
+        return []
+    return ObjectList(results) if isinstance(results[0], ObjectGrouping) else results
+MapOperator = Operator(
+    name="map",
+    runner=map_operator_runner
+)
+
+def select_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    # takes in a variable number of arguments, each a string
+    # only keeps those fields of the context
+    arguments = run_all_if_possible(context, arguments, all_data)
+
+    context_validator = either(
+        is_object_grouping,
+        is_object_list,
+        is_dict,
+    )
+    if not context_validator(context):
+        raise QueryError(f"Select must be called on an ObjectList, ObjectGrouping, or dict, got {type(context)}: {context}")
     
-    # Custom validation: all inputs must be Chains that start with get_field operators
-    for i, chain in enumerate(args):
-        debug(f"validating chain {i+1}:", chain)
-        assert isinstance(chain, Chain), f"Select operator argument {i} must be a chain, got {type(chain)}: {chain}"
-        assert len(chain.operator_nodes) > 0, f"Not enough operator nodes in chain {i}: {chain}"
-        assert chain.operator_nodes[0].operator == GetFieldOperator, f"Select operator argument {i} must start with a get_field operator, got {chain.operator_nodes[0].operator}"
-        debug(f"chain {i+1} validation passed")
+    # validate arguments
+    for arg in arguments:
+        if not isinstance(arg, str):
+            raise QueryError(f"Select arguments must be strings, got {type(arg)}: {arg}")
+
+    if isinstance(context, dict):
+        return {
+            k: v for k, v in context.items() if k in arguments
+        }
     
-    result: list[SAObject] = []
-    for i, object in enumerate(context.objects):
-        debug(f"processing object {i+1}/{len(context.objects)}: {object.id}")
-        new_object = object.empty_copy()
-        taken_field_names: set[str] = set()
-        for j, chain in enumerate(args):
-            field_value = chain.run(ObjectList([object]), all_data)
-            if field_value is None:
-                continue
-            get_field_operator: OperatorNode = chain.operator_nodes[0]
-            field_name = get_field_operator.arguments[0]
-            field_name_to_use = field_name
-            next_number_to_use = 2
-            while field_name_to_use in taken_field_names:
-                field_name_to_use = f"{field_name}_{next_number_to_use}"
-                next_number_to_use += 1
-            taken_field_names.add(field_name_to_use)
-            debug(f"  chain {j+1} extracted field '{field_name}':", field_value)
-            new_object.set_field(field_name_to_use, field_value)
-        result.append(new_object)
-        debug(f"created new object with {len(new_object.properties)} properties")
+    if isinstance(context, ObjectGrouping):
+        return context.select_fields(arguments)
     
-    debug("select complete, created", len(result), "objects")
-    return ObjectList(result)
+    if isinstance(context, ObjectList):
+        return ObjectList([
+            obj.select_fields(arguments) for obj in context.objects
+        ])
+    
+    assert False
+
 SelectOperator = Operator(
     name="select",
     runner=select_operator_runner
@@ -402,30 +432,20 @@ def flatten_fully(lst):
     return result
 
 def includes_operator_runner(context: SAType, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
-    parser.add_arg(str, "value")
-    parser.validate_context(is_valid_sa_type)
+    parser = ArgumentParser("includes")
+    parser.add_arg(str, "value", "The value to search for must be a string.")
+    parser.validate_context(is_list, "Includes must be called on a list.")
     args = parser.parse(context, arguments, all_data)
-    
-    debug("starting includes operation")
-    debug("context:", context)
-    debug("searching for value:", args.value)
-    debug("context type:", type(context).__name__)
     
     assert not isinstance(context, dict), f"includes operator context must not be a dict, got {type(context)}: {context}"
     
     if not isinstance(context, list):
-        debug("context is not a list, doing direct comparison")
         result = args.value == context
-        debug("direct comparison result:", result)
         return result
     
-    debug("context is a list, flattening and searching")
     flattened = flatten_fully(context)
-    debug("flattened context:", flattened)
     
     result = args.value in flattened
-    debug("inclusion check result:", result)
     return result
 IncludesOperator = Operator(
     name="includes",
@@ -433,35 +453,17 @@ IncludesOperator = Operator(
 )
 
 def flatten_operator_runner(context: SAType, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
-    parser.validate_context(is_valid_sa_type)
+    parser = ArgumentParser("flatten")
+    parser.validate_context(is_list, "Flatten must be called on a list.")
     parser.parse(context, arguments, all_data)
     
-    debug("starting flatten operation")
-    debug("context:", context)
-    debug("context type:", type(context).__name__)
-    
-    assert not isinstance(context, dict), f"flatten operator context must not be a dict, got {type(context)}: {context}"
-    
-    if not isinstance(context, list):
-        debug("context is not a list, wrapping in list")
-        result = [context]
-        debug("result:", result)
-        return result
-    
     if len(context) == 0:
-        debug("context is empty list, returning empty list")
         return []
     
-    debug("context is list with", len(context), "items")
     if not all(isinstance(item, list) for item in context):
-        debug("not all items are lists, returning as-is")
-        debug("result:", context)
         return context
     
-    debug("all items are lists, flattening")
     result = [item for sublist in context for item in sublist]
-    debug("flattened result:", result)
     return result
 FlattenOperator = Operator(
     name="flatten",
@@ -469,26 +471,11 @@ FlattenOperator = Operator(
 )
 
 def unique_operator_runner(context: SAType, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
-    parser.validate_context(is_valid_sa_type)
+    parser = ArgumentParser("unique")
+    parser.validate_context(is_list, "Requires list")
     parser.parse(context, arguments, all_data)
     
-    debug("starting unique operation")
-    debug("context:", context)
-    debug("context type:", type(context).__name__)
-    
-    if not isinstance(context, list):
-        debug("context is not a list, wrapping in list")
-        result = [context]
-        debug("result:", result)
-        return result
-    
-    debug("context is list with", len(context), "items")
-    debug("original items:", context)
-    
     unique_items = list(set(context))
-    debug("unique items:", unique_items)
-    debug("removed", len(context) - len(unique_items), "duplicates")
     
     return unique_items
 UniqueOperator = Operator(
@@ -496,50 +483,35 @@ UniqueOperator = Operator(
     runner=unique_operator_runner
 )
 
-def count_operator_runner(context: QueryPrimitive, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
-    parser.validate_context(is_valid_primitive)
+def count_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("count")
+    parser.validate_context(either(is_object_list, is_list), "Can only count ObjectList or list items")
     parser.parse(context, arguments, all_data)
-    
-    debug("starting count operation")
-    debug("context:", context)
-    debug("context type:", type(context).__name__)
     
     if isinstance(context, ObjectList):
         count = len(context.objects)
-        debug("context is ObjectList with", count, "objects")
         return count
     
     if isinstance(context, list):
         count = len(context)
-        debug("context is list with", count, "items")
         return count
-    
-    debug("context is primitive, returning 1")
-    return 1
+
 CountOperator = Operator(
     name="count",
     runner=count_operator_runner
 )
 
-def describe_operator_runner(context: QueryPrimitive, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    parser = ArgumentParser()
+def describe_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("describe")
     parser.validate_context(is_valid_primitive)
     parser.parse(context, arguments, all_data)
     
-    debug("starting describe operation")
-    debug("context:", context)
-    debug("context type:", type(context).__name__)
-    
     # If input is not an ObjectList, just return str() representation
     if not isinstance(context, ObjectList):
-        debug("context is not ObjectList, returning str representation")
         result = str(context)
-        debug("str result:", result)
         return result
     
     # Handle ObjectList input
-    debug("context is ObjectList with", len(context.objects), "objects")
     
     if len(context.objects) == 0:
         return "Empty ObjectList"
@@ -604,79 +576,211 @@ def describe_operator_runner(context: QueryPrimitive, arguments: Arguments, all_
         description_parts.append(type_info)
     
     result = "\n".join(description_parts)
-    debug("describe result:", result)
     return result
 DescribeOperator = Operator(
     name="describe",
     runner=describe_operator_runner
 )
 
-def slice_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
-    # Validate context is ObjectList
+def summary_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("summary")
+    parser.validate_context(is_valid_primitive)
+    parser.parse(context, arguments, all_data)
+    
+    # If input is not an ObjectList, just return str() representation
     if not isinstance(context, ObjectList):
-        raise TypeError(f"Expected context to be an ObjectList, got {type(context)}: {context}")
+        result = str(context)
+        return result
     
-    debug("starting slice operation")
-    debug("context has", len(context.objects), "objects")
-    debug("arguments:", arguments)
+    # Handle ObjectList input
     
-    # Get the objects list
-    objects = context.objects
+    if len(context.objects) == 0:
+        return "Empty ObjectList"
     
-    # Handle arguments manually to support None values
-    start = None
-    end = None
-    step = None
+    # Collect basic statistics
+    total_count = len(context.objects)
+    types = set()
+    sources = set()
     
-    if len(arguments) > 0 and arguments[0] is not None:
-        start = int(arguments[0])
-    if len(arguments) > 1 and arguments[1] is not None:
-        end = int(arguments[1])
-    if len(arguments) > 2 and arguments[2] is not None:
-        step = int(arguments[2])
+    # Analyze each object to collect types, sources, and properties
+    type_properties = {}  # type -> set of properties
+    type_sources = {}     # type -> set of sources
+    property_values = {}  # property -> list of values (for variance calculation)
     
-    debug("start:", start)
-    debug("end:", end)
-    debug("step:", step)
+    for obj in context.objects:
+        obj_types = obj.types  # This is a list of types
+        obj_source = obj.source
+        
+        # Add all types from this object
+        for obj_type in obj_types:
+            types.add(obj_type)
+            
+            # Track properties for this type
+            if obj_type not in type_properties:
+                type_properties[obj_type] = set()
+                type_sources[obj_type] = set()
+            
+            type_sources[obj_type].add(obj_source)
+            
+            # Collect all properties from this object
+            for prop_name in obj.properties.keys():
+                type_properties[obj_type].add(prop_name)
+        
+        sources.add(obj_source)
+        
+        # Collect property values for variance calculation
+        for prop_name, prop_value in obj.properties.items():
+            if prop_name not in property_values:
+                property_values[prop_name] = []
+            property_values[prop_name].append(prop_value)
     
-    # Handle None values (Python slice behavior)
-    if step is None or step > 0:
-        start = start if start is not None else 0
-        end = end if end is not None else len(objects)
-        step = step if step is not None else 1
+    # Calculate variance for each property (using unique value count as proxy for variance)
+    property_variance = {}
+    for prop_name, values in property_values.items():
+        # Count unique values as a measure of variance
+        unique_values = len(set(str(v) for v in values))
+        property_variance[prop_name] = unique_values
+    
+    # Build description string
+    description_parts = []
+    description_parts.append(f"ObjectList with {total_count} objects")
+    
+    if len(types) > 0:
+        types_str = ", ".join(sorted(types))
+        description_parts.append(f"Types: {types_str}")
+    
+    if len(sources) > 0:
+        sources_str = ", ".join(sorted(sources))
+        description_parts.append(f"Sources: {sources_str}")
+    
+    # Add schema information for each type
+    for obj_type in sorted(types):
+        type_count = sum(1 for obj in context.objects if obj_type in obj.types)
+        type_sources_list = sorted(type_sources[obj_type])
+        properties_list = sorted(type_properties[obj_type])
+        
+        type_info = f"\n  {obj_type} ({type_count} objects)"
+        if type_sources_list:
+            type_info += f" from sources: {', '.join(type_sources_list)}"
+        
+        if properties_list:
+            # If more than 15 properties, show only the 15 with most variance
+            if len(properties_list) > 15:
+                # Get properties for this type and their variance scores
+                type_property_variance = []
+                for prop in properties_list:
+                    if prop in property_variance:
+                        type_property_variance.append((prop, property_variance[prop]))
+                
+                # Sort by variance (descending) and take top 15
+                type_property_variance.sort(key=lambda x: x[1], reverse=True)
+                top_properties = [prop for prop, _ in type_property_variance[:15]]
+                type_info += f"\n    Properties ({len(properties_list)} total, showing 15 most variable): {', '.join(top_properties)}"
+            else:
+                type_info += f"\n    Properties: {', '.join(properties_list)}"
+        else:
+            type_info += "\n    No properties"
+        
+        description_parts.append(type_info)
+    
+    result = "\n".join(description_parts)
+    return result
+
+SummaryOperator = Operator(
+    name="summary",
+    runner=summary_operator_runner
+)
+
+def slice_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    # Handle different context types
+    if isinstance(context, ObjectList):
+        items = context.objects
+    elif isinstance(context, list):
+        items = context
     else:
-        # For negative step, None values have different defaults
-        start = start if start is not None else len(objects) - 1
-        end = end if end is not None else None  # None means "go to beginning"
-        step = step
+        raise QueryError("You can only use the slice operator on an ObjectList or list (e.g. list[2]).")
     
-    debug("resolved start:", start)
-    debug("resolved end:", end)
-    debug("resolved step:", step)
+    if len(arguments) == 0:
+        raise QueryError("Slice operator expects at least 1 argument.")
+    if len(arguments) > 3:
+        raise QueryError("Slice operator expects at most 3 arguments.")
+
+    if not all(isinstance(arg, int) or arg == "" for arg in arguments):
+        raise QueryError("Slice operator arguments must be integers or empty strings.")
     
-    # Validate step
-    if step == 0:
-        raise ValueError("slice step cannot be zero")
+    if len(arguments) == 1 and arguments[0] == "":
+        raise QueryError("Invalid slice syntax: []. Wtf do I do with this?")
     
-    # Just use Python's built-in slice behavior
+    inside_area = ":".join([str(arg) for arg in arguments])
+    str_to_eval = f"items[{inside_area}]"
     try:
-        result_objects = objects[start:end:step]
-    except (ValueError, TypeError) as e:
-        # Handle any edge cases
-        debug("slice error:", e)
-        result_objects = []
+        result_items = eval(str_to_eval)
+    except Exception as e:
+        raise QueryError(f"Error while evaluating \"[{inside_area}]\": {str(e)}")
     
-    debug("slice result has", len(result_objects), "objects")
-    return ObjectList(result_objects)
+    # Return appropriate type based on input context
+    if isinstance(context, ObjectList) and not isinstance(result_items, ObjectGrouping):
+        return ObjectList(result_items)
+    else:
+        return result_items
 
 SliceOperator = Operator(
     name="slice",
     runner=slice_operator_runner
 )
 
+def any_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("any")
+    parser.validate_context(is_valid_primitive)
+    parser.parse(context, arguments, all_data)
+    
+    if isinstance(context, ObjectList):
+        result = len(context.objects) > 0
+        return result
+    
+    if isinstance(context, list):
+        result = len(context) > 0
+        return result
+    
+    # For primitive types, consider them as "any" if they're not None/empty
+    result = bool(context)
+    return result
+
+AnyOperator = Operator(
+    name="any",
+    runner=any_operator_runner
+)
+
+def get_by_id_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("get_by_id")
+    parser.add_arg(str, "obj_id", "The ID to search for must be a string.")
+    parser.validate_context(is_object_list, "You can only use the get_by_id operator on an ObjectList.")
+    args = parser.parse(context, arguments, all_data)
+    
+    return context.get_by_id(args.obj_id)
+GetByIdOperator = Operator(
+    name="get_by_id",
+    runner=get_by_id_operator_runner
+)
+
+def filter_by_type_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+    parser = ArgumentParser("filter_by_type")
+    parser.add_arg(str, "type_name", "The type to filter by must be a string.")
+    parser.validate_context(is_object_list, "You can only use the filter_by_type operator on an ObjectList.")
+    args = parser.parse(context, arguments, all_data)
+    
+    return context.filter_by_type(args.type_name)
+
+FilterByTypeOperator = Operator(
+    name="filter_by_type",
+    runner=filter_by_type_operator_runner
+)
+
 all_operators = [
     EqualsOperator,
     RegexEqualsOperator,
+    AndOperator,
+    OrOperator,
     GetFieldOperator,
     FilterOperator,
     SelectOperator,
@@ -685,5 +789,14 @@ all_operators = [
     UniqueOperator,
     CountOperator,
     DescribeOperator,
-    SliceOperator
+    SummaryOperator,
+    SliceOperator,
+    ToJsonOperator,
+    AnyOperator,
+    HasFieldOperator,
+    ShowPlanOperator,
+    GetByIdOperator,
+    FilterByTypeOperator,
+    MapOperator,
+    ForeachOperator
 ]

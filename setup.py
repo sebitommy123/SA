@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="sa",
     version="0.1.0",
-    author="Sebi",
+    author="Sebastiaan Szafir",
     author_email="",
     description="Semantic Analysis Framework for generic JSON objects",
     long_description=long_description,

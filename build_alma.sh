@@ -16,6 +16,48 @@ echo "📁 Copying source files..."
 cp -r sa/ "$BUILD_DIR/"
 cp requirements.txt "$BUILD_DIR/"
 
+# Auto-increment version number in shell.py
+echo "🔢 Auto-incrementing version number..."
+
+# First, check if the main source file has a VERSION
+SOURCE_SHELL_PY="sa/shell/shell.py"
+if [ -f "$SOURCE_SHELL_PY" ]; then
+    # Extract current version number from source
+    CURRENT_VERSION=$(grep -o 'VERSION = [0-9]\+' "$SOURCE_SHELL_PY" | grep -o '[0-9]\+')
+    if [ -z "$CURRENT_VERSION" ]; then
+        CURRENT_VERSION=0
+        # Add VERSION line if it doesn't exist
+        echo "VERSION = 0" >> "$SOURCE_SHELL_PY"
+    fi
+    
+    # Increment version
+    NEW_VERSION=$((CURRENT_VERSION + 1))
+    echo "📈 Version: $CURRENT_VERSION → $NEW_VERSION"
+    
+    # Update the version in the source file
+    sed -i '' "s/VERSION = [0-9]*/VERSION = $NEW_VERSION/" "$SOURCE_SHELL_PY"
+    
+    # Verify the change in source
+    echo "✅ Updated version in source $SOURCE_SHELL_PY:"
+    grep "VERSION = " "$SOURCE_SHELL_PY"
+else
+    echo "⚠️  Warning: Source shell.py not found, starting with version 1"
+    NEW_VERSION=1
+fi
+
+# Also update the copied file in build directory
+SHELL_PY="$BUILD_DIR/shell/shell.py"
+if [ -f "$SHELL_PY" ]; then
+    # Update the version in the copied file
+    sed -i '' "s/VERSION = [0-9]*/VERSION = $NEW_VERSION/" "$SHELL_PY"
+    
+    # Verify the change
+    echo "✅ Updated version in build $SHELL_PY:"
+    grep "VERSION = " "$SHELL_PY"
+else
+    echo "⚠️  Warning: Build shell.py not found, skipping version increment"
+fi
+
 # Create Python 3.5 compatible startup.py
 cat > "$BUILD_DIR/startup.py" << 'EOF'
 #!/usr/bin/env python3
@@ -32,6 +74,51 @@ import zipfile
 import requests
 import subprocess
 import shutil
+
+# PyInstaller detection
+def is_pyinstaller_binary():
+    """Check if this script is running as a PyInstaller binary."""
+    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+def get_binary_path():
+    """Get the path to the current binary (works for both script and PyInstaller binary)."""
+    if is_pyinstaller_binary():
+        return sys.executable
+    else:
+        return os.path.abspath(__file__)
+
+def copy_binary_to_sa_dir():
+    """Copy the current binary to ~/.sa/sa-installer for future use."""
+    # Only copy if we're running as a PyInstaller binary
+    if not is_pyinstaller_binary():
+        print("ℹ️  Skipping installer copy (not running as PyInstaller binary)")
+        return True
+    
+    print("📋 Copying installer to ~/.sa/sa-installer...")
+    
+    # Create ~/.sa directory if it doesn't exist
+    sa_dir = os.path.expanduser("~/.sa")
+    if not os.path.exists(sa_dir):
+        os.makedirs(sa_dir)
+    
+    # Get the current binary path
+    binary_path = get_binary_path()
+    target_path = os.path.join(sa_dir, "sa-installer")
+    
+    try:
+        # Copy the binary
+        shutil.copy2(binary_path, target_path)
+        
+        # Make it executable
+        os.chmod(target_path, 0o755)
+        
+        print("✅ Installer copied to: {}".format(target_path))
+        print("💡 You can now run: ~/.sa/sa-installer")
+        return True
+        
+    except Exception as e:
+        print("❌ Failed to copy installer: {}".format(e))
+        return False
 
 # Configuration
 DOWNLOAD_URL = "https://zubatomic.com/sa-alma.tar.gz"
@@ -230,6 +317,9 @@ def main():
     # Add to PATH
     add_to_path()
     
+    # Copy installer binary to ~/.sa for future use
+    copy_binary_to_sa_dir()
+    
     # Clean up archive file
     os.unlink(archive_path)
     print("🧹 Cleaned up download file")
@@ -240,6 +330,7 @@ def main():
     print("\n🎉 Installation complete!")
     print("📁 Shell installed to: {}".format(os.path.join(str(BIN_DIR), SHELL_NAME)))
     print("📁 Files location: {}".format(install_dir_str))
+    print("📁 Installer copied to: {}".format(os.path.join(os.path.expanduser("~"), ".sa", "sa-installer")))
     print("\n💡 To use the shell in new terminals, restart your terminal or run:")
     home_dir = os.path.expanduser("~")
     zshrc_path = os.path.join(home_dir, '.zshrc')

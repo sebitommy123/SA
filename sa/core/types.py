@@ -4,18 +4,31 @@ This module breaks circular dependencies by centralizing type definitions.
 """
 
 from __future__ import annotations
-from typing import Union, TYPE_CHECKING
+from typing import Union
 
-if TYPE_CHECKING:
-    from sa.query_language.object_list import ObjectList
+from sa.core.sa_types import SATypeCustom
 
 # Core type definitions
 SATypePrimitive = Union[str, int, bool, float, None, list['SATypePrimitive'], dict[str, 'SATypePrimitive']]
 
 # Forward reference for the main type union
-SAType = 'SAType'  # Will be defined after all classes are available
+SAType = Union[SATypeCustom, SATypePrimitive]
 
-# Type aliases for query language
-QueryPrimitive = Union['ObjectList', 'SAType']
-QueryType = Union[QueryPrimitive, 'Chain']
-Arguments = list[QueryType]
+def is_valid_sa_type_primitive(t: any) -> bool:
+    if isinstance(t, str) or isinstance(t, int) or isinstance(t, bool) or isinstance(t, float):
+        return True
+    if isinstance(t, list):
+        return all(is_valid_sa_type(i) for i in t)
+    if isinstance(t, dict):
+        return all(is_valid_sa_type(i) for i in t.values())
+    if t is None:
+        return True
+    return False
+
+def is_valid_sa_type(t: any) -> bool:
+    if is_valid_sa_type_primitive(t):
+        return True
+    # Import here to avoid circular import issues
+    if isinstance(t, SATypeCustom):
+        return True
+    return False

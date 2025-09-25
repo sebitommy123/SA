@@ -9,8 +9,10 @@ import json
 import requests
 from typing import List, Optional, Union
 from dataclasses import dataclass
-from sa.core.sa_object import SAObject
-from sa.query_language.object_list import ObjectList
+
+from ..core.object_grouping import group_objects
+from ..core.sa_object import SAObject
+from ..core.object_list import ObjectList
 
 
 @dataclass
@@ -99,7 +101,7 @@ class ProviderConnection:
             
             if not quiet:
                 print(f"    ✓ Fetched {len(sa_objects)} objects")
-            return ObjectList(sa_objects)
+            return ObjectList(group_objects(sa_objects))
             
         except requests.exceptions.RequestException as e:
             if not quiet:
@@ -110,9 +112,7 @@ class ProviderConnection:
                 print(f"    ✗ Invalid JSON response: {e}")
             return None
         except Exception as e:
-            if not quiet:
-                print(f"    ✗ Unexpected error: {e}")
-            return None
+            raise e
 
 
 def load_providers(providers_file: Union[str, None] = None, quiet: bool = False) -> List[ProviderConnection]:

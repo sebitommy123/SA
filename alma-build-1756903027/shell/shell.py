@@ -16,10 +16,12 @@ from sa.shell.provider_manager import load_providers, list_providers, fetch_all_
 from sa.query_language.main import Chain
 import traceback
 
+VERSION = 1
+
 def print_header():
     """Print the shell header with nice formatting."""
     print("╔══════════════════════════════════════════════════════════════╗")
-    print("║                    SA Query Language Shell                  ║")
+    print(f"║                    SA Query Language Shell v{VERSION}                 ║")
     print("║                                                              ║")
     print("║  Type 'quit', 'exit', or 'q' to exit                        ║")
     print("║  Type 'help' for available commands                         ║")

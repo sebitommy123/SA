@@ -14,6 +14,50 @@ import subprocess
 import shutil
 from pathlib import Path
 
+# PyInstaller detection
+def is_pyinstaller_binary():
+    """Check if this script is running as a PyInstaller binary."""
+    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+def get_binary_path():
+    """Get the path to the current binary (works for both script and PyInstaller binary)."""
+    if is_pyinstaller_binary():
+        return sys.executable
+    else:
+        return os.path.abspath(__file__)
+
+def copy_binary_to_sa_dir():
+    """Copy the current binary to ~/.sa/sa-installer for future use."""
+    # Only copy if we're running as a PyInstaller binary
+    if not is_pyinstaller_binary():
+        print("ℹ️  Skipping installer copy (not running as PyInstaller binary)")
+        return True
+    
+    print("📋 Copying installer to ~/.sa/sa-installer...")
+    
+    # Create ~/.sa directory if it doesn't exist
+    sa_dir = Path.home() / ".sa"
+    sa_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Get the current binary path
+    binary_path = get_binary_path()
+    target_path = sa_dir / "sa-installer"
+    
+    try:
+        # Copy the binary
+        shutil.copy2(binary_path, target_path)
+        
+        # Make it executable
+        os.chmod(target_path, 0o755)
+        
+        print(f"✅ Installer copied to: {target_path}")
+        print(f"💡 You can now run: ~/.sa/sa-installer")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to copy installer: {e}")
+        return False
+
 # Configuration
 DOWNLOAD_URL = "https://zubatomic.com/sa.zip"
 INSTALL_DIR = Path.home() / ".sa" / "installation"
@@ -172,7 +216,7 @@ def run_shell():
 
 def main():
     """Main installation process."""
-    print("🚀 SA Shell Auto-Installer")
+    print("🚀 SA Shell Auto-Installer V2")
     print("=" * 40)
     
     # Clean up any existing installation
@@ -199,6 +243,9 @@ def main():
     # Add to PATH
     add_to_path()
     
+    # Copy installer binary to ~/.sa for future use
+    copy_binary_to_sa_dir()
+    
     # Clean up zip file
     zip_path.unlink()
     print("🧹 Cleaned up download file")
@@ -209,6 +256,7 @@ def main():
     print("\n🎉 Installation complete!")
     print(f"📁 Shell installed to: {BIN_DIR / SHELL_NAME}")
     print(f"📁 Files location: {INSTALL_DIR}")
+    print(f"📁 Installer copied to: {Path.home() / '.sa' / 'sa-installer'}")
     print("\n💡 To use the shell in new terminals, restart your terminal or run:")
     zshrc_path = Path.home() / '.zshrc'
     bashrc_path = Path.home() / '.bashrc'

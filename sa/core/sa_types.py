@@ -4,11 +4,7 @@ from typing import TYPE_CHECKING, Optional
 import datetime
 
 if TYPE_CHECKING:
-    from sa.query_language.object_list import ObjectList
-
-# Forward references for types defined elsewhere
-SATypePrimitive = 'SATypePrimitive'
-SAType = 'SAType'
+    from sa.core.object_list import ObjectList
 
 class SATypeCustom(ABC):
     name: str = ""
@@ -65,7 +61,7 @@ class SALink(SATypeCustom):
         return execute_query(self.value["query"], all_data)
     
     def to_text(self) -> str:
-        return f"<{self.value['show_text']}>"        
+        return f"<{self.value['show_text']}>"
 
 SA_TYPES = [
     SATimestamp,
@@ -74,7 +70,7 @@ SA_TYPES = [
 
 def resolve_primitive_recursively(primitive: 'SATypePrimitive') -> 'SAType':
     # Import here to avoid circular import
-    from sa.core.sa_object import is_valid_sa_type_primitive
+    from sa.core.types import is_valid_sa_type_primitive
     assert is_valid_sa_type_primitive(primitive), "Primitive is not a valid primitive"
     if isinstance(primitive, dict):
         if "__sa_type__" in primitive:

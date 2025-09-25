@@ -1,14 +1,15 @@
-from sa.query_language.object_list import ObjectList
-from sa.core.sa_object import SAObject
+from ..core.object_list import ObjectList
+from ..core.sa_object import SAObject
+from ..core.object_grouping import ObjectGrouping
 
 def render_object_list(objects: ObjectList) -> str:
     result = ""
-    for group in objects.group_by_id_types():
-        result += render_object_as_group(group)
+    for obj in objects.objects:
+        result += render_object_as_group(obj)
 
     return result
 
-def render_object_as_group(objects: ObjectList) -> str:
+def render_object_as_group(objects: ObjectGrouping) -> str:
     """
     Render a list of objects as a group.
     
@@ -20,20 +21,18 @@ def render_object_as_group(objects: ObjectList) -> str:
         cores@source2@source3@source4: 3
         ...
     """
-    assert len(set(obj.id for obj in objects.objects)) == 1
+    assert len(set(obj.id for obj in objects._objects)) == 1
 
-    all_types = set()
-    all_sources = set()
-    for obj in objects.objects:
-        all_types.update(obj.types)
-        all_sources.add(obj.source)
-
-    header = f"#{objects.objects[0].id} ({', '.join(all_types)} @{'@'.join(all_sources)})"
+    # Use ANSI escape codes for color (e.g., bright cyan)
+    HEADER_COLOR = "\033[96m"
+    RESET_COLOR = "\033[0m"
+    header = f"{HEADER_COLOR}{objects.name}{RESET_COLOR}"
     
     # Collect all unique property names
     all_properties = set()
-    for obj in objects.objects:
+    for obj in objects._objects:
         all_properties.update(obj.properties.keys())
+    all_properties = all_properties.intersection(objects.fields)
     
     properties_txt = ""
     
@@ -41,7 +40,7 @@ def render_object_as_group(objects: ObjectList) -> str:
     for field in sorted(all_properties):
         # Get all values for this field from all objects
         field_values = []
-        for obj in objects.objects:
+        for obj in objects._objects:
             if field in obj.properties:
                 field_values.append((obj.source, obj.properties[field]))
         

@@ -3,7 +3,7 @@ Unit tests for the get_token_arguments function.
 """
 
 import pytest
-from sa.query_language.main import get_token_arguments, get_tokens_from_query
+from sa.query_language.parser import get_token_arguments, get_tokens_from_query
 
 
 class TestGetTokenArguments:
