@@ -10,6 +10,11 @@ if TYPE_CHECKING:
 class QueryError(Exception):
     pass
 
+def assert_query(condition: bool, message: str) -> None:
+    """Custom assert function that raises QueryError instead of AssertionError."""
+    if not condition:
+        raise QueryError(message)
+
 class QueryAreaTerms(Enum):
     CHAR = "CHAR"
     TOKEN = "TOKEN"
@@ -41,10 +46,10 @@ class QueryArea:
         )
  
     def to_char_terms(self, tokens: Tokens) -> QueryArea:
-        assert self.terms == QueryAreaTerms.TOKEN, f"Expected TOKEN area, got {self.terms}"
-        assert self.start_index >= 0, f"Expected start index >= 0, got {self.start_index}"
-        assert self.end_index <= len(tokens), f"Expected end index <= {len(tokens)}, got {self.end_index}"
-        assert self.start_index <= self.end_index, f"Expected start index <= end index, got {self.start_index} > {self.end_index}"
+        assert_query(self.terms == QueryAreaTerms.TOKEN, f"Expected TOKEN area, got {self.terms}")
+        assert_query(self.start_index >= 0, f"Expected start index >= 0, got {self.start_index}")
+        assert_query(self.end_index <= len(tokens), f"Expected end index <= {len(tokens)}, got {self.end_index}")
+        assert_query(self.start_index <= self.end_index, f"Expected start index <= end index, got {self.start_index} > {self.end_index}")
         lengths = [len(token) for token in tokens]
         start_char_index = sum(lengths[:self.start_index])
         end_char_index = sum(lengths[:self.end_index])

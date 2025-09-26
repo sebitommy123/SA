@@ -1,6 +1,7 @@
 from ..core.object_list import ObjectList
 from ..core.sa_object import SAObject
 from ..core.object_grouping import ObjectGrouping
+from .errors import assert_query
 
 def render_object_list(objects: ObjectList) -> str:
     result = ""
@@ -21,7 +22,7 @@ def render_object_as_group(objects: ObjectGrouping) -> str:
         cores@source2@source3@source4: 3
         ...
     """
-    assert len(set(obj.id for obj in objects._objects)) == 1
+    assert_query(len(set(obj.id for obj in objects._objects)) == 1, "All objects in the group must have the same ID")
 
     # Use ANSI escape codes for color (e.g., bright cyan)
     HEADER_COLOR = "\033[96m"

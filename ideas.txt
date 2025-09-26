@@ -1,7 +1,10 @@
 
 HIGH PRIO
 
-Put on github
+Generally speaking, making a function work on more inputs is good! Making a function's outputs less deterministic is bad. I think these optimizations should be auto-applied:
+ 1. If it works on an ObjectGrouping, it works on an ObjectList with just one grouping
+
+and remember, .show_plan() should not just show have the SAP give instructions on how you could yourself query this stuff if you wanted
 
 Source selector doesn't work anymore, because it can't break up ObjectGroupings
     This dies: python -m sa.shell.shell ".map(@source_A.lol)"

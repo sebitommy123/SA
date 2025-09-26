@@ -2,10 +2,15 @@ from dataclasses import dataclass
 from decimal import Context
 from typing import Optional
 import sys
-from .errors import QueryArea, QueryAreaTerms, QueryError, print_error_area
+from .errors import QueryArea, QueryAreaTerms, QueryError, print_error_area, assert_query
 from .types import QueryType
 from .chain import Chain, OperatorNode
-from .operators import EqualsOperator, ForeachOperator, RegexEqualsOperator, AndOperator, OrOperator, FilterOperator, GetFieldOperator, SelectOperator, SliceOperator, all_operators
+from .operators import all_operators
+from .operators.comparison import EqualsOperator, RegexEqualsOperator
+from .operators.logical import AndOperator, OrOperator
+from .operators.field_operations import GetFieldOperator
+from .operators.list_operations import ForeachOperator, FilterOperator, SelectOperator
+from .operators.slice import SliceOperator
 
 Tokens = list[str]
 
@@ -33,7 +38,7 @@ def get_tokens_from_query(query: str) -> Tokens:
     if current_alphanumeric:
         tokens.append(current_alphanumeric)
 
-    assert "".join(tokens) == query, f"Expected query to be the same, got {query} and {''.join(tokens)}"
+    assert_query("".join(tokens) == query, f"Expected query to be the same, got {query} and {''.join(tokens)}")
     
     return tokens
 
@@ -109,11 +114,11 @@ def accumulate_identifier_tokens(tokens: Tokens, start_index: int, allowed_chars
                     continue
         break
 
-    assert len(accumulated_tokens) > 0, f"Expected identifier at index {start_index}"
+    assert_query(len(accumulated_tokens) > 0, f"Expected identifier at index {start_index}")
     return ''.join(accumulated_tokens), scan_index
 
 def get_token_arguments(current_area: QueryArea, tokens: Tokens, current_token_index: int, paren_open: str, paren_close: str, argument_separator: Optional[str]) -> tuple[list[Tokens], int, list[QueryArea]]:
-    assert tokens[current_token_index] == paren_open, f"Expected {paren_open} at index {current_token_index}, got {tokens[current_token_index]}"
+    assert_query(tokens[current_token_index] == paren_open, f"Expected {paren_open} at index {current_token_index}, got {tokens[current_token_index]}")
     current_token_index += 1
     num_open_parens = 1
     arguments: list[Tokens] = []
@@ -138,7 +143,7 @@ def get_token_arguments(current_area: QueryArea, tokens: Tokens, current_token_i
             num_open_parens += 1
         elif token == paren_close:
             num_open_parens -= 1
-            assert num_open_parens >= 0, f"Unexpected closing parenthesis at index {current_token_index}"
+            assert_query(num_open_parens >= 0, f"Unexpected closing parenthesis at index {current_token_index}")
             if num_open_parens == 0:
                 # Add the last argument and break
                 arguments.append(current_argument)
@@ -150,12 +155,12 @@ def get_token_arguments(current_area: QueryArea, tokens: Tokens, current_token_i
         current_token_index += 1
         current_area.end_index += 1
     
-    assert num_open_parens == 0, f"Couldn't find a matching closing parenthesis for paren at index {current_token_index}"
+    assert_query(num_open_parens == 0, f"Couldn't find a matching closing parenthesis for paren at index {current_token_index}")
     return arguments, current_token_index, argument_areas
 
 def trim_tokens(tokens: Tokens, area: QueryArea) -> tuple[Tokens, QueryArea]:
     area = area.clone()
-    assert area.terms == QueryAreaTerms.TOKEN, f"Expected TOKEN area, got {area.terms}"
+    assert_query(area.terms == QueryAreaTerms.TOKEN, f"Expected TOKEN area, got {area.terms}")
     # Remove leading whitespace tokens
     while tokens and tokens[0].isspace():
         tokens.pop(0)
@@ -172,8 +177,8 @@ def get_parser_results(results: list[QueryType]) -> QueryType:
     if all(isinstance(result, OperatorNode) for result in results):
         return Chain(results)
     else:
-        assert len(results) != 0, "Empty input?"
-        assert len(results) <= 1, f"Expected 1 result, got {len(results)}"
+        assert_query(len(results) != 0, "Empty input?")
+        assert_query(len(results) <= 1, f"Expected 1 result, got {len(results)}")
         return results[0]
 
 
@@ -184,7 +189,7 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
     current_token_index = 0
     results: list[QueryType] = []
 
-    assert area.terms == QueryAreaTerms.TOKEN, f"Expected TOKEN area, got {area.terms}"
+    assert_query(area.terms == QueryAreaTerms.TOKEN, f"Expected TOKEN area, got {area.terms}")
     tokens, area = trim_tokens(tokens, area)
 
     try:
@@ -200,7 +205,7 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                 
             if current_state == 'start':
                 if token == "*":
-                    assert current_token_index == 0, f"Expected * at start of query, got {token} at index {current_token_index}"
+                    assert_query(current_token_index == 0, f"Expected * at start of query, got {token} at index {current_token_index}")
                     current_token_index += 1
                 elif token == ".":
                     current_state = 'after_dot'
@@ -227,7 +232,7 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                         right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
                         return Chain([OperatorNode(operator=RegexEqualsOperator, arguments=[left, right], area=area)])
                     else:
-                        raise ValueError(f"Expected == or =~, got just one =")
+                        raise QueryError(f"Expected == or =~, got just one =")
                 elif token == "&":
                     if token_after == "&":
                         # && operator
@@ -235,7 +240,7 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                         right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
                         return Chain([OperatorNode(operator=AndOperator, arguments=[left, right])], area=area)
                     else:
-                        raise ValueError(f"Expected &&, got just one &")
+                        raise QueryError(f"Expected &&, got just one &")
                 elif token == "|":
                     if token_after == "|":
                         # || operator
@@ -243,14 +248,14 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                         right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
                         return Chain([OperatorNode(operator=OrOperator, arguments=[left, right])], area=area)
                     else:
-                        raise ValueError(f"Expected ||, got just one |")
+                        raise QueryError(f"Expected ||, got just one |")
                 elif token == "[":
                     if token_after == "[":
                         operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index+1, "[", "]", ",")
                         print(close_paren_index)
                         token_after_close_paren = tokens[close_paren_index + 1] if close_paren_index + 1 < len(tokens) else None
                         if token_after_close_paren != "]":
-                            raise ValueError(f"Expected ]], got ]{token_after_close_paren}")
+                            raise QueryError(f"Expected ]], got ]{token_after_close_paren}")
                         new_area = area[current_token_index:close_paren_index+2]
                         inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(all_tokens, inside_tokens, arg_area) for inside_tokens, arg_area in zip(operator_token_arguments, argument_areas)]
                         results.append(OperatorNode(operator=SelectOperator, arguments=inside_querytypes, area=new_area))
@@ -274,7 +279,7 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                             results.append(OperatorNode(operator=SliceOperator, arguments=arguments, area=new_area))
                             current_token_index = close_paren_index + 1
                         else:
-                            assert len(operator_token_arguments) >= 1 and len(operator_token_arguments) <= 2, f"Expected 1 or 2 arguments, got {len(operator_token_arguments)}"
+                            assert_query(len(operator_token_arguments) >= 1 and len(operator_token_arguments) <= 2, f"Expected 1 or 2 arguments, got {len(operator_token_arguments)}")
                             inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(all_tokens, inside_tokens, arg_area) for inside_tokens, arg_area in zip(operator_token_arguments, argument_areas)]
                             results.append(OperatorNode(operator=FilterOperator, arguments=inside_querytypes, area=new_area))
                             current_token_index = close_paren_index + 1
@@ -282,7 +287,7 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                     # This is shorthand for .select(chain, chain, chain, ...)
                     operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index, "{", "}", ",")
                     new_area = area[current_token_index:close_paren_index+1]
-                    assert len(operator_token_arguments) > 0, f"Expected at least 1 argument, got {len(operator_token_arguments)}"
+                    assert_query(len(operator_token_arguments) > 0, f"Expected at least 1 argument, got {len(operator_token_arguments)}")
                     inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(all_tokens, inside_tokens, arg_area) for inside_tokens, arg_area in zip(operator_token_arguments, argument_areas)]
                     results.append(OperatorNode(operator=ForeachOperator, arguments=inside_querytypes, area=new_area))
                     current_token_index = close_paren_index + 1
@@ -304,11 +309,11 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                     # @<source> is shorthand for [.__source__ == <source>]
                     accumulated_source, scan_index = accumulate_identifier_tokens(tokens, current_token_index + 1, "alnum_-")
                     results.append(parse_query_into_querytype(
-                        f"[.__source__[].includes('{accumulated_source}')]"
+                        f".filter_by_source('{accumulated_source}')"
                     ).operator_nodes[0])
                     current_token_index = scan_index
                 else:
-                    assert current_token_index == 0, f"Can only do syntax-free shorthand type filtering at the beginning, got {token} at index {current_token_index}"
+                    assert_query(current_token_index == 0, f"Can only do syntax-free shorthand type filtering at the beginning, got {token} at index {current_token_index}")
                     # Accumulate type tokens to support hyphenated types
                     accumulated_type, scan_index = accumulate_identifier_tokens(tokens, current_token_index)
                     # Is shorthand for .filter(.get_field("__types__").includes(token))
@@ -319,7 +324,7 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
             elif current_state == 'after_dot':
                 if token_after == "(":
                     operator = next((op for op in all_operators if op.name == token), None)
-                    assert operator, f"Invalid operator: {token}"
+                    assert_query(operator, f"Invalid operator: {token}")
                     operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index + 1, "(", ")", ",")
                     new_area = area[current_token_index:close_paren_index+1]
                     if close_paren_index == current_token_index + 2:
@@ -367,9 +372,9 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                     string_state_string += token
                     current_token_index += 1
             else:
-                raise ValueError(f"Invalid state: {current_state}")
+                raise QueryError(f"Invalid state: {current_state}")
             
-            assert current_token_index > current_token_index_at_start, f"Token index didn't move forward from {current_token_index_at_start} to {current_token_index} for token {token} in state {current_state}"
+            assert_query(current_token_index > current_token_index_at_start, f"Token index didn't move forward from {current_token_index_at_start} to {current_token_index} for token {token} in state {current_state}")
     except Exception as e:
         print("While parsing this area:")
         print_error_area(area)

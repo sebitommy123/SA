@@ -40,8 +40,8 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "sa-shell=sa.shell.shell:main",
-            "sa-query=sa.shell.shell:main",
+            "sa-shell=sa.shell:main",
+            "sa-query=sa.shell:main",
         ],
     },
 ) 

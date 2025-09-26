@@ -8,6 +8,7 @@ class ObjectList:
     objects: list[ObjectGrouping]
     _type_index: dict[str, list[ObjectGrouping]] = None
     _id_index: dict[str, ObjectGrouping] = None
+    _source_index: dict[str, list[ObjectGrouping]] = None
 
     def __post_init__(self):
         # Ensure all objects are unique by their unique_id property
@@ -21,6 +22,7 @@ class ObjectList:
         # Pre-compute indexes for fast filtering
         self._build_type_index()
         self._build_id_index()
+        self._build_source_index()
     
     def _build_type_index(self):
         """Build an index of objects by type for fast filtering."""
@@ -39,6 +41,15 @@ class ObjectList:
             assert obj_id not in self._id_index, f"Duplicate object found: {obj_id}"
             self._id_index[obj_id] = obj
     
+    def _build_source_index(self):
+        """Build an index of objects by source for fast filtering."""
+        self._source_index = {}
+        for obj in self.objects:
+            for source in obj.sources:
+                if source not in self._source_index:
+                    self._source_index[source] = []
+                self._source_index[source].append(obj)
+    
     def filter_by_type(self, type_name: str) -> 'ObjectList':
         """Fast filtering by type using pre-computed index."""
         if self._type_index is None:
@@ -51,6 +62,22 @@ class ObjectList:
         result.objects = matching_objects
         result._type_index = None  # Will be built on demand
         result._id_index = None    # Will be built on demand
+        result._source_index = None  # Will be built on demand
+        return result
+    
+    def filter_by_source(self, source_name: str) -> 'ObjectList':
+        """Fast filtering by source using pre-computed index."""
+        if self._source_index is None:
+            self._build_source_index()
+        
+        matching_objects = self._source_index.get(source_name, [])
+        
+        # Create ObjectList without triggering __post_init__ to avoid rebuilding indexes
+        result = ObjectList.__new__(ObjectList)
+        result.objects = matching_objects
+        result._type_index = None  # Will be built on demand
+        result._id_index = None    # Will be built on demand
+        result._source_index = None  # Will be built on demand
         return result
     
     def get_by_id(self, obj_id: str) -> ObjectList:
