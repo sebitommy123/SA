@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
+from sa.query_language.types import AbsorbingNone
 from sa.core.object_grouping import ObjectGrouping
 from sa.query_language.argument_parser import ArgumentParser
 from sa.query_language.validators import either, is_object_grouping, is_object_list
@@ -42,10 +43,14 @@ def filter_by_source_operator_runner(context: ObjectList, arguments: Arguments, 
     context, args = parser.parse(context, arguments, all_data)
 
     if isinstance(context, ObjectGrouping):
-        return context.select_sources(args.source_name)
+        result = context.select_sources(args.source_name)
+        if result is None:
+            return AbsorbingNone
+        return result
     
     filtered = context.filter_by_source(args.source_name)
     selected = [obj.select_sources(args.source_name) for obj in filtered.objects]
+    selected = [obj for obj in selected if obj is not None]
     return ObjectList(selected)
 
 FilterBySourceOperator = Operator(

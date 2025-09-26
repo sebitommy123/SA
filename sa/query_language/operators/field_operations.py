@@ -30,6 +30,9 @@ def get_field_operator_runner(context: QueryType, arguments: Arguments, all_data
     
     object_grouping = context
 
+    if object_grouping is AbsorbingNone:
+        return AbsorbingNone
+
     if args.return_all_values:
         return object_grouping.get_all_field_values(args.field_name, all_data)
 

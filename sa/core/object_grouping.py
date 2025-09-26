@@ -44,8 +44,10 @@ class ObjectGrouping:
     def has_id_type(self, id_type: tuple[str, str]) -> bool:
         return id_type in self.id_types
 
-    def select_sources(self, sources: set[str]) -> ObjectGrouping:
+    def select_sources(self, sources: set[str]) -> Optional[ObjectGrouping]:
         matching_objects = [obj for obj in self._objects if obj.source in sources]
+        if len(matching_objects) == 0:
+            return None
         return ObjectGrouping(matching_objects, self._field_overrides, self._selected_fields)
     
     @property
