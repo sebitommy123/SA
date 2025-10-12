@@ -3,16 +3,17 @@ from typing import TYPE_CHECKING
 from sa.query_language.argument_parser import ArgumentParser
 from sa.core.types import is_valid_sa_type
 from sa.query_language.chain import Operator
+from sa.query_language.query_state import QueryState
 
 if TYPE_CHECKING:
     from sa.query_language.types import QueryType, Arguments, QueryContext
     from sa.core.object_list import ObjectList
 
-def and_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def and_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("and")
     parser.add_arg(is_valid_sa_type, "left")
     parser.add_arg(is_valid_sa_type, "right")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     left = args.left
     right = args.right
@@ -28,11 +29,11 @@ AndOperator = Operator(
     runner=and_operator_runner
 )
 
-def or_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def or_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("or")
     parser.add_arg(is_valid_sa_type, "left")
     parser.add_arg(is_valid_sa_type, "right")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     left = args.left
     right = args.right

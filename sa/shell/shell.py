@@ -9,11 +9,13 @@ import readline
 import sys
 import argparse
 
+from sa.query_language.query_scope import Scopes
+from sa.query_language.query_state import QueryState
+from sa.query_language.parser import run_query
 from sa.core.object_list import ObjectList
 from sa.core.object_grouping import ObjectGrouping
-from sa.query_language.execute import execute_query
 from sa.query_language.render import render_object_as_group, render_object_list
-from sa.shell.provider_manager import load_providers, list_providers, fetch_all_providers
+from sa.shell.provider_manager import Providers, load_providers
 from sa.query_language.chain import Chain
 import traceback
 
@@ -43,10 +45,10 @@ def print_section_footer():
     print()
 
 
-def execute_query_shell(query: str, context):
+def execute_query_shell(query: str, providers: Providers):
     """Execute a query string and return the result."""
     try:
-        result = execute_query(query, context)
+        result = run_query(query, providers)
         return result, None
     except Exception as e:
         return None, traceback.format_exc()
@@ -72,40 +74,28 @@ def format_result(result, show_count: bool = True):
         return str(result)
 
 
-def load_and_fetch_data(verbose: bool = False, quiet: bool = False):
-    """Load providers and fetch data, with optional verbose output and quiet mode."""
+def run_non_interactive(query: str, verbose: bool = False, quiet: bool = False, debug: bool = False):
+    """Run a single query in non-interactive mode."""
     if verbose and not quiet:
         print("🔧 Loading Providers...")
     
     providers = load_providers(quiet=quiet)
     
     if verbose and not quiet:
-        print(f"📊 Loaded {len(providers)} provider(s)")
+        print(f"📊 Loaded {len(providers.providers)} provider(s)")
         print("🔧 Fetching Data...")
     
-    all_data = fetch_all_providers(providers, quiet=quiet)
+    providers.fetch_initial_data(quiet=quiet)
     
     if verbose and not quiet:
-        print(f"📊 Loaded {len(all_data.objects)} total objects")
-    
-    return all_data
-
-
-def run_non_interactive(query: str, verbose: bool = False, quiet: bool = False, debug: bool = False, profiling: bool = False):
-    """Run a single query in non-interactive mode."""
-    all_data = load_and_fetch_data(verbose, quiet)
+        print(f"📊 Loaded {len(providers.all_data.objects)} total objects")
     
     # Set debug mode globally if requested
     if debug:
         import sa.query_language.operators
         sa.query_language.operators.DEBUG_ENABLED = True
     
-    # Set profiling mode globally if requested
-    if profiling:
-        import sa.query_language.operators
-        sa.query_language.operators.PROFILING_ENABLED = True
-    
-    result, error = execute_query_shell(query, all_data)
+    result, error = execute_query_shell(query, providers)
     
     if error:
         print(f"Error: {error}")
@@ -196,14 +186,14 @@ Examples:
     # If a query is provided, run in non-interactive mode
     if args.query:
         verbose = args.verbose and not args.quiet
-        run_non_interactive(args.query, verbose, args.quiet, args.debug, args.print_profiling_information)
+        run_non_interactive(args.query, verbose, args.quiet, args.debug)
         return
     
     # Otherwise, start interactive shell
-    run_interactive_shell(args.debug, args.print_profiling_information)
+    run_interactive_shell(args.debug)
 
 
-def run_interactive_shell(debug: bool = False, profiling: bool = False):
+def run_interactive_shell(debug: bool = False):
     """Run the interactive shell loop."""
     print_header()
     
@@ -215,8 +205,8 @@ def run_interactive_shell(debug: bool = False, profiling: bool = False):
     
     # Fetch data from all providers that support ALL_AT_ONCE mode
     print_section_header("Fetching Data")
-    all_data = fetch_all_providers(providers)
-    print(f"\n📊 Summary: {len(all_data.objects)} total objects loaded")
+    providers.fetch_initial_data()
+    print(f"\n📊 Summary: {len(providers.all_data._objects)} total objects loaded")
     print_section_footer()
     
     # Set debug mode if requested
@@ -224,13 +214,6 @@ def run_interactive_shell(debug: bool = False, profiling: bool = False):
         import sa.query_language.operators
         sa.query_language.operators.DEBUG_ENABLED = True
         print("🐛 Debug mode enabled")
-        print()
-    
-    # Set profiling mode if requested
-    if profiling:
-        import sa.query_language.operators
-        sa.query_language.operators.PROFILING_ENABLED = True
-        print("⏱️  Profiling mode enabled")
         print()
     
     # Main shell loop
@@ -254,7 +237,6 @@ def run_interactive_shell(debug: bool = False, profiling: bool = False):
                 print("  help     - Show this help message")
                 print("  refresh  - Reload data from all providers")
                 print("  debug    - Toggle debug mode on/off")
-                print("  profile  - Toggle profiling mode on/off")
                 print("  quit     - Exit the shell")
                 print("  exit     - Exit the shell")
                 print("  q        - Exit the shell")
@@ -271,8 +253,8 @@ def run_interactive_shell(debug: bool = False, profiling: bool = False):
             if user_input.lower() == 'refresh':
                 print("\n🔄 Refreshing data from all providers...")
                 print_section_header("Refreshing Data")
-                all_data = fetch_all_providers(providers)
-                print(f"\n📊 Summary: {len(all_data.objects)} total objects loaded")
+                providers.fetch_initial_data()
+                print(f"\n📊 Summary: {len(providers.all_data.objects)} total objects loaded")
                 print_section_footer()
                 print("✅ Data refreshed successfully!")
                 print()
@@ -287,21 +269,12 @@ def run_interactive_shell(debug: bool = False, profiling: bool = False):
                 print()
                 continue
             
-            # Check for profile command
-            if user_input.lower() == 'profile':
-                import sa.query_language.operators
-                sa.query_language.operators.PROFILING_ENABLED = not sa.query_language.operators.PROFILING_ENABLED
-                status = "enabled" if sa.query_language.operators.PROFILING_ENABLED else "disabled"
-                print(f"\n⏱️  Profiling mode {status}")
-                print()
-                continue
-            
             # Skip empty input
             if not user_input:
                 continue
             
             # Execute the query
-            result, error = execute_query_shell(user_input, all_data)
+            result, error = execute_query_shell(user_input, providers)
             
             if error:
                 print(f"❌ Error: {error}")

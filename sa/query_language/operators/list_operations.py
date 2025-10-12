@@ -9,19 +9,20 @@ from sa.query_language.utils import flatten_fully
 from sa.core.object_list import ObjectList
 from sa.core.object_grouping import ObjectGrouping
 from sa.core.types import SAType
+from sa.query_language.query_state import QueryState
 
 if TYPE_CHECKING:
     from sa.query_language.types import QueryType, Arguments, QueryContext
 
-def filter_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def filter_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("filter")
     parser.add_arg(Chain, "chain", "The filtering expression must be able to be evaluated on each object to a boolean.")
     parser.validate_context(is_object_list, "You can use the filter operator on an ObjectList.")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
         
     survivors: list[ObjectGrouping] = []
     for i, grouped_object in enumerate(context.objects):
-        chain_result = args.chain.run(ObjectList([grouped_object]), all_data)
+        chain_result = args.chain.run(ObjectList([grouped_object]), query_state)
 
         if isinstance(chain_result, AbsorbingNoneType):
             continue
@@ -39,13 +40,13 @@ FilterOperator = Operator(
     runner=filter_operator_runner
 )
 
-def map_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def map_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("map")
     parser.add_arg(Chain, "chain", "The mapping expression must be able to be evaluated on each object to a value.")
     parser.validate_context(is_object_list, "You can use the map operator on an ObjectList.")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
-    results = [args.chain.run(obj, all_data) for obj in context.objects]
+    results = [args.chain.run(obj, query_state) for obj in context.objects]
     results = [res for res in results if not isinstance(res, AbsorbingNoneType)]
     if len(results) == 0:
         return []
@@ -56,7 +57,7 @@ MapOperator = Operator(
     runner=map_operator_runner
 )
 
-def foreach_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def foreach_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
     raise QueryError("Foreach operator is not implemented yet")
 
 ForeachOperator = Operator(
@@ -64,10 +65,10 @@ ForeachOperator = Operator(
     runner=foreach_operator_runner
 )
 
-def select_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def select_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
     # takes in a variable number of arguments, each a string
     # only keeps those fields of the context
-    arguments = run_all_if_possible(context, arguments, all_data)
+    arguments = run_all_if_possible(context, arguments, query_state)
 
     context_validator = either(
         is_object_grouping,
@@ -81,6 +82,9 @@ def select_operator_runner(context: ObjectList, arguments: Arguments, all_data: 
     for arg in arguments:
         if not isinstance(arg, str):
             raise QueryError(f"Select arguments must be strings, got {type(arg)}: {arg}")
+    
+    # Filter needed_scopes to only include scopes that have the selected fields
+    query_state.needed_scopes = query_state.needed_scopes.filter_fields(arguments)
 
     if isinstance(context, dict):
         return {
@@ -102,32 +106,22 @@ SelectOperator = Operator(
     runner=select_operator_runner
 )
 
-def includes_operator_runner(context: SAType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def includes_operator_runner(context: SAType, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("includes")
     parser.add_arg(str, "value", "The value to search for must be a string.")
     parser.validate_context(is_list, "Includes must be called on a list.")
-    context, args = parser.parse(context, arguments, all_data)
-    
-    assert_query(not isinstance(context, dict), f"includes operator context must not be a dict, got {type(context)}: {context}")
-    
-    if not isinstance(context, list):
-        result = args.value == context
-        return result
-    
-    flattened = flatten_fully(context)
-    
-    result = args.value in flattened
-    return result
+    context, args = parser.parse(context, arguments, query_state)
+    return args.value in context
 
 IncludesOperator = Operator(
     name="includes",
     runner=includes_operator_runner
 )
 
-def flatten_operator_runner(context: SAType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def flatten_operator_runner(context: SAType, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("flatten")
     parser.validate_context(is_list, "Flatten must be called on a list.")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     if len(context) == 0:
         return []
@@ -143,10 +137,10 @@ FlattenOperator = Operator(
     runner=flatten_operator_runner
 )
 
-def unique_operator_runner(context: SAType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def unique_operator_runner(context: SAType, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("unique")
     parser.validate_context(is_list, "Requires list")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     unique_items = list(set(context))
     

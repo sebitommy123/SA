@@ -6,20 +6,23 @@ from sa.query_language.validators import either, is_single_object_list, is_objec
 from sa.query_language.errors import QueryError
 from sa.query_language.types import AbsorbingNone
 from sa.query_language.chain import Operator
-from sa.query_language.utils import convert_list_of_sa_objects_to_object_list_if_needed
 from sa.core.object_grouping import ObjectGrouping
+from sa.query_language.query_state import QueryState
 
 if TYPE_CHECKING:
     from sa.query_language.types import QueryType, Arguments, QueryContext
     from sa.core.object_list import ObjectList
 
-def get_field_operator_runner(context: QueryType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def get_field_operator_runner(context: QueryType, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("get_field")
     parser.add_arg(str, "field_name", "The field to get must be a string.")
     parser.add_arg(bool, "return_none_if_missing", "Please specify whether to return None if the field is missing.")
     parser.add_arg(bool, "return_all_values", "Please specify whether to return all values for the field from all sources.")
     parser.validate_context(either(is_object_grouping, is_dict), "You can only use the get_field operator on an individual object or dicts.")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
+    
+    # Filter needed_scopes to only include scopes that have the requested field
+    query_state.needed_scopes = query_state.needed_scopes.filter_fields([args.field_name])
 
     if isinstance(context, dict):
         if not args.field_name in context:
@@ -34,25 +37,25 @@ def get_field_operator_runner(context: QueryType, arguments: Arguments, all_data
         return AbsorbingNone
 
     if args.return_all_values:
-        return object_grouping.get_all_field_values(args.field_name, all_data)
+        return object_grouping.get_all_field_values(args.field_name, query_state)
 
     if not object_grouping.has_field(args.field_name):
         if args.return_none_if_missing:
             return AbsorbingNone
         raise QueryError(f"Field '{args.field_name}' not found in object: {object_grouping}")
 
-    return object_grouping.get_field(args.field_name, all_data)
+    return object_grouping.get_field(args.field_name, query_state)
 
 GetFieldOperator = Operator(
     name="get_field",
     runner=get_field_operator_runner
 )
 
-def has_field_operator_runner(context: QueryType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def has_field_operator_runner(context: QueryType, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("has_field")
     parser.add_arg(str, "field_name", "The field to check must be a string.")
     parser.validate_context(either(is_single_object_list, is_object_grouping, is_dict), "You can only use the has_field operator on an individual object or dicts.")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     if isinstance(context, dict):
         return args.field_name in context
@@ -66,42 +69,58 @@ HasFieldOperator = Operator(
     runner=has_field_operator_runner
 )
 
-def get_field_regex_operator_runner(context: QueryType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def get_field_regex_operator_runner(context: QueryType, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("get_field_regex")
-    parser.add_arg(str, "field_name")
-    parser.validate_context(either(is_single_object_list, is_object_grouping))
-    context, args = parser.parse(context, arguments, all_data)
+    parser.add_arg(str, "regex_pattern", "The regex pattern to match field names must be a string.")
+    parser.add_arg(bool, "return_none_if_missing", "Please specify whether to return None if no fields match the regex.")
+    parser.add_arg(bool, "return_all_values", "Please specify whether to return all values for matching fields from all sources.")
+    parser.validate_context(either(is_object_grouping, is_dict), "You can only use the get_field_regex operator on an individual object or dicts.")
+    context, args = parser.parse(context, arguments, query_state)
 
-    object_grouping = context if isinstance(context, ObjectGrouping) else context.objects[0]
-    
     try:
         # Compile the regex pattern
-        pattern = re.compile(args.field_name)
+        pattern = re.compile(args.regex_pattern)
     except re.error as e:
-        raise QueryError(f"Invalid regex pattern '{args.field_name}': {e}")
-    
-    result = []
-    for obj in context.objects:
-        matching_fields = []
-        for field_name in obj.properties.keys():
-            if pattern.search(field_name):
-                field_value = obj.get_field(field_name, all_data)
-                field_value = convert_list_of_sa_objects_to_object_list_if_needed(field_value)
-                matching_fields.append((field_name, field_value))
-        
-        if matching_fields:
-            # If multiple fields match, return a dict with field names as keys
-            field_dict = {name: value for name, value in matching_fields}
-            result.append(field_dict)
-    
-    result = convert_list_of_sa_objects_to_object_list_if_needed(result)
+        raise QueryError(f"Invalid regex pattern '{args.regex_pattern}': {e}")
 
-    if len(result) == 1:
-        return result[0]
-    if len(result) == 0:
-        return None
+    if isinstance(context, dict):
+        # Find fields that match the regex pattern
+        matching_fields = [field for field in context.keys() if pattern.search(field)]
+        
+        if not matching_fields:
+            if args.return_none_if_missing:
+                return AbsorbingNone
+            raise QueryError(f"No fields match regex pattern '{args.regex_pattern}' in dict: {context}")
+        
+        if args.return_all_values:
+            # Return all values for all matching fields
+            return [context[field] for field in matching_fields]
+        
+        # Return the first matching field's value
+        return context[matching_fields[0]]
     
-    return result
+    object_grouping = context
+
+    if object_grouping is AbsorbingNone:
+        return AbsorbingNone
+
+    # Find fields that match the regex pattern
+    matching_fields = [field for field in object_grouping.fields if pattern.search(field)]
+    
+    if not matching_fields:
+        if args.return_none_if_missing:
+            return AbsorbingNone
+        raise QueryError(f"No fields match regex pattern '{args.regex_pattern}' in object: {object_grouping}")
+
+    if args.return_all_values:
+        # Return all values for all matching fields from all sources
+        all_values = []
+        for field in matching_fields:
+            all_values.extend(object_grouping.get_all_field_values(field, query_state))
+        return all_values
+    
+    # Return the first matching field's value
+    return object_grouping.get_field(matching_fields[0], query_state)
 
 GetFieldRegexOperator = Operator(
     name="get_field_regex",

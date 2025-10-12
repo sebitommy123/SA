@@ -7,17 +7,18 @@ from sa.core.types import is_valid_sa_type
 from sa.query_language.errors import QueryError
 from sa.query_language.types import AbsorbingNone, AbsorbingNoneType
 from sa.query_language.chain import Operator
+from sa.query_language.query_state import QueryState
 
 if TYPE_CHECKING:
     from sa.query_language.types import QueryType, Arguments, QueryContext
     from sa.core.object_list import ObjectList
 
-def equals_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def equals_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("equals")
     parser.validate_context(anything, "")
     parser.add_arg(is_valid_sa_type, "left", "Left side of equals must be a valid SA type")
     parser.add_arg(is_valid_sa_type, "right", "Right side of equals must be a valid SA type")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     left = args.left
     right = args.right
@@ -33,12 +34,12 @@ EqualsOperator = Operator(
     runner=equals_operator_runner
 )
 
-def regex_equals_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def regex_equals_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("regex_equals")
     parser.add_arg(str, "left", "Left side of regex equals must be a string")
     parser.add_arg(str, "right", "Right side of regex equals must be a string")
     parser.validate_context(anything, "")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     left = args.left
 

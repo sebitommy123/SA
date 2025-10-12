@@ -3,7 +3,7 @@
 Entry point for running the shell as a module: python -m sa.shell
 """
 
-from .shell import main
+from sa.shell.shell import main
 
 if __name__ == "__main__":
     main()

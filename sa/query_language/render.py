@@ -1,7 +1,7 @@
-from ..core.object_list import ObjectList
-from ..core.sa_object import SAObject
-from ..core.object_grouping import ObjectGrouping
-from .errors import assert_query
+from sa.core.object_list import ObjectList
+from sa.core.sa_object import SAObject
+from sa.core.object_grouping import ObjectGrouping
+from sa.query_language.errors import assert_query
 
 def render_object_list(objects: ObjectList) -> str:
     result = ""

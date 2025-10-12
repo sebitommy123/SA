@@ -1,16 +1,19 @@
 from dataclasses import dataclass
-from decimal import Context
 from typing import Optional
 import sys
-from .errors import QueryArea, QueryAreaTerms, QueryError, print_error_area, assert_query
-from .types import QueryType
-from .chain import Chain, OperatorNode
-from .operators import all_operators
-from .operators.comparison import EqualsOperator, RegexEqualsOperator
-from .operators.logical import AndOperator, OrOperator
-from .operators.field_operations import GetFieldOperator
-from .operators.list_operations import ForeachOperator, FilterOperator, SelectOperator
-from .operators.slice import SliceOperator
+from sa.core.object_list import ObjectList
+from sa.query_language.query_scope import Scopes
+from sa.shell.provider_manager import Providers
+from sa.query_language.query_state import QueryState
+from sa.query_language.errors import QueryArea, QueryAreaTerms, QueryError, print_error_area, assert_query
+from sa.query_language.types import QueryType
+from sa.query_language.chain import Chain, OperatorNode
+from sa.query_language.operators import all_operators
+from sa.query_language.operators.comparison import EqualsOperator, RegexEqualsOperator
+from sa.query_language.operators.logical import AndOperator, OrOperator
+from sa.query_language.operators.field_operations import GetFieldOperator
+from sa.query_language.operators.list_operations import ForeachOperator, FilterOperator, SelectOperator
+from sa.query_language.operators.slice import SliceOperator
 
 Tokens = list[str]
 
@@ -391,18 +394,19 @@ def parse_query_into_querytype(query: str) -> QueryType:
         raise e
     return result
 
-def run_query(query: str, context: Context) -> QueryType:
+def run_query(query: str, providers: Providers) -> QueryType:
     result = None
+    query_state = QueryState.setup(providers)
     try:
         parsed_query = parse_query_into_querytype(query)
-
         if isinstance(parsed_query, Chain):
-            result = parsed_query.run(context, context)
+            result = parsed_query.run(query_state.all_data, query_state)
         else:
             result = parsed_query
     except QueryError as e:
-        return f"Error: {str(e)}"
+        result = f"Error: {str(e)}"
     except Exception as e:
         raise e
 
+    print(query_state.final_needed_scopes)
     return result

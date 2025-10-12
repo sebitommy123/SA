@@ -3,15 +3,16 @@ from typing import TYPE_CHECKING
 from sa.query_language.argument_parser import ArgumentParser
 from sa.query_language.validators import is_valid_primitive
 from sa.query_language.chain import Operator
+from sa.query_language.query_state import QueryState
 
 if TYPE_CHECKING:
     from sa.query_language.types import QueryType, Arguments, QueryContext
     from sa.core.object_list import ObjectList
 
-def describe_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def describe_operator_runner(context: QueryContext, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("describe")
     parser.validate_context(is_valid_primitive)
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     # If input is not an ObjectList, just return str() representation
     if not isinstance(context, ObjectList):
@@ -90,10 +91,10 @@ DescribeOperator = Operator(
     runner=describe_operator_runner
 )
 
-def summary_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def summary_operator_runner(context: QueryContext, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("summary")
     parser.validate_context(is_valid_primitive)
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     # If input is not an ObjectList, just return str() representation
     if not isinstance(context, ObjectList):

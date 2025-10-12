@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from sa.core.object_list import ObjectList
     from .sa_object import SAObject
     from .types import SAType
+    from sa.query_language.query_state import QueryState
 
 @dataclass
 class ObjectGrouping:
@@ -64,10 +65,10 @@ class ObjectGrouping:
     def select_fields(self, fields: set[str]) -> ObjectGrouping:
         return ObjectGrouping(self._objects, self._field_overrides, fields)
 
-    def get_field(self, field_name: str, all_data: 'ObjectList') -> 'SAType':
+    def get_field(self, field_name: str, query_state: 'QueryState') -> 'SAType':
         if field_name in self._field_overrides:
             return self._field_overrides[field_name]
-        field_values_list = [obj.get_field(field_name, all_data) for obj in self._objects if obj.has_field(field_name)]
+        field_values_list = [obj.get_field(field_name, query_state) for obj in self._objects if obj.has_field(field_name)]
         if len(field_values_list) == 0:
             raise QueryError(f"Object {self} has no field \"{field_name}\"")
         any_field_values_are_list_or_dict = any(isinstance(field_value, list) or isinstance(field_value, dict) for field_value in field_values_list)
@@ -85,10 +86,10 @@ class ObjectGrouping:
             return True
         return any(obj.has_field(field_name) for obj in self._objects)
 
-    def get_all_field_values(self, field_name: str, all_data: 'ObjectList') -> list['SAType']:
+    def get_all_field_values(self, field_name: str, query_state: 'QueryState') -> list['SAType']:
         if field_name in self._field_overrides:
             return [self._field_overrides[field_name]]
-        return [obj.get_field(field_name, all_data) for obj in self._objects if obj.has_field(field_name)]
+        return [obj.get_field(field_name, query_state) for obj in self._objects if obj.has_field(field_name)]
 
     def __str__(self) -> str:
         HEADER_COLOR = "\033[96m"

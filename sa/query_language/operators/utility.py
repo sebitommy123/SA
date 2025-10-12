@@ -5,27 +5,28 @@ from sa.query_language.validators import anything, is_valid_querytype, is_valid_
 from sa.query_language.chain import Operator, Chain
 from sa.core.sa_object import SAObject
 from sa.core.object_list import ObjectList
+from sa.query_language.query_state import QueryState
 
 if TYPE_CHECKING:
     from sa.query_language.types import QueryType, Arguments, QueryContext
     from sa.core.object_list import ObjectList
 
-def show_plan_operator_runner(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def show_plan_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("show_plan")
     parser.add_arg(Chain, "chain", "The chain to show the plan for")
     parser.validate_context(anything, "")
-    context, args = parser.parse(context, arguments, all_data)
-    return args.chain
+    context, args = parser.parse(context, arguments, query_state)
+    return f"Chain({args.chain}) {query_state.needed_scopes}"
 
 ShowPlanOperator = Operator(
     name="show_plan",
     runner=show_plan_operator_runner
 )
 
-def to_json_operator_runner(context: QueryType, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def to_json_operator_runner(context: QueryType, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("to_json")
     parser.validate_context(is_valid_querytype)
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     if isinstance(context, SAObject):
         return context.json
@@ -39,10 +40,10 @@ ToJsonOperator = Operator(
     runner=to_json_operator_runner
 )
 
-def count_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def count_operator_runner(context: QueryContext, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("count")
     parser.validate_context(either(is_object_list, is_list), "Can only count ObjectList or list items")
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     if isinstance(context, ObjectList):
         count = len(context.objects)
@@ -57,10 +58,10 @@ CountOperator = Operator(
     runner=count_operator_runner
 )
 
-def any_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def any_operator_runner(context: QueryContext, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("any")
     parser.validate_context(is_valid_primitive)
-    context, args = parser.parse(context, arguments, all_data)
+    context, args = parser.parse(context, arguments, query_state)
     
     if isinstance(context, ObjectList):
         result = len(context.objects) > 0

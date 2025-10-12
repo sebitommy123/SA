@@ -1,9 +1,16 @@
 
 HIGH PRIO
 
+I don't like the make_object API for SA, its ugly
+
+I want to create an app that can run multiple providers
+    As such, you should be able to define multiple providers from just one python file and pass them on
+    multiple_providers will then just run them all in separate processes and create a UI dashboard for you to see how they're doing
+
+Fix GroupObjects function, it is stupid and doesn't consider Type
+
 I think all operators should instantly return AbsorbingNone if passed in as context (or arguments?)
 
-and remember, .show_plan() should not just show have the SAP give instructions on how you could yourself query this stuff if you wanted
 
 Source selector doesn't work anymore, because it can't break up ObjectGroupings
     This dies: python -m sa ".map(@source_A.lol)"
@@ -14,6 +21,7 @@ This dies:
 XML custom type
 
 Lazy loading
+and remember, .show_plan() should not just show have the SAP give instructions on how you could yourself query this stuff if you wanted
  * trades
     - by timestamp, max 2 seconds worth
  * network switches + interfaces + FPGAs
@@ -204,3 +212,149 @@ That way it becomes:
 #product_underlying_mappings.ProductUnderlyingMappingsConfiguration.ProductUnderlyingMappings[.underlying == TFC].products
 
 Also these files should be lazy loaded, which requires solving figuring out which SAP to hit given an id
+
+
+-----
+
+lazy-loading
+
+lazy_query("trade", date=='YYYYMMDD', cp=='JS')
+lazy_query("host", id=="host_001")
+lazy_query("interface", host=="host_001")
+
+lazy_query will:
+ 1. Figure out all the SAPs that lazily serve this type
+ 2. Query them with the filter conditions
+ 3. Report if any of them deny on lack of specificity
+ 4. Add all the results to client-side all_data, as well as add them to the context
+ 5. Cache the query for the amount of time the server specifies (next time this query is called, if in that TTL, it will just instantly return the same thing as before)
+
+There's also lazy_query_plan, which just has the SAP return what it will do (or deny)
+
+It has to be a runtime thing, bc at static time we don't have enough information to plan out the lazy_queries.
+
+Two main cases:
+ 1. Query by type and some other fields to get an ObjectList (e.g. trades, interfaces)
+ 2. Query by type and id to get a single SAObject
+
+Some situations:
+ 1. You don't have the type but have an ID, in which case you need SAPs to tell you likely types
+ 2. You have a link which then has a filter applied, so clearly have to not lazy load until the last moment
+
+
+Issues:
+ 1. With static analysis you know what will happen in the future
+ 2. With runtime state you have access to runtime values
+
+We need a mix, essentially we do a static analysis of each chain before running it.
+
+Scopes have:
+ 1. A list of conditions, each has a field on the left, an operator and a constant on the right. The field can't be a link.
+
+We need to make a distinction between passive and active operators:
+ 1. Passive operators do not modify the data
+ 2. Passive operators can remove certain Objects or fields from the objects
+ 3. Passive operators can be ran in theoretical analysis mode, where they return a scope that they would be left with. A Scope has a) list of conditions b) fields of interest
+
+SAPs advertise:
+ 1. A list of scopes (including fields) that it has. If it doesn't know fields because it depends on the query, it just says "*"
+
+Requirements:
+ 1. For this to work we have to fix the "hidden query" issue created by links.
+    e.g. #app_01.trades[.date == 'YYYYMMDD']
+    The link also acts as a "restart" point for static analysis.
+    It actually works because get_field is already a passive operator, in this case it just gets resets the scope so far!
+ 2. Also we have to fix repetitive queries in filter operators that could be replaced by single larger queries.
+    e.g. app[.trades[.date == 'YYYYMMDD'].count() > 1]
+    In this case, we really want to end up sending a query for all apps that we will process.
+    Easy solution! Before running a loop with [] or {}, calculate all of the scopes for each one
+
+System:
+ 1. Before executing each chain, statically extract the scope until we hit a non-passive operator.
+
+
+Unknown attribute
+ 1. An unknown_attribute is a (type, id, attribute) for which a SAP says they have information but is has not been downloaded
+
+Static analysis:
+ 1. Repeat these steps
+ 1. You have a list of known_scopes before starting, starts at []
+ 2. As well as a list of needed_scopes
+ 3. For each passive operator, it determines whether or not all the attributes
+
+How to execute a query:
+ 1. Queries now output the scopes they need to execute. They do this by having each operator output not just the result, but also the scopes they need. This is called scope_inspect on an operator. Scope_inspect takes in the scopes that are currently needed (starting with all of them), and can modify them. They can also move scopes or just add new scopes into the staged area, where they can no longer be modified. Examples:
+    .filter_by_type removes any of the current scopes that aren't of this type
+    .get_field just modifies the current scope to only need the field. if it's a link, it actually stages all current scopes, and then executes the link and sets the returning scopes to the new current scopes
+    .set_field adds a staged scope which is just the current scopes with just the field needed
+    .filter_by_source will just get rid of the scopes without this source
+ 2. Then, when we're done, we check if all the scopes (staged and current) are KNOWN, meaning data for them is downloaded. If it isn't we download it and restart from step (1)! Re-execute with more data. If it's known, we're done and return the result.
+This system allows the resolving of lazy-loaded recursive links.
+This also means that, alongside all_data, we need to pass in all_scopes. Perhaps scopes can just be part of ObjectList for simplicity. Maybe ObjectList should just be called QueryExecutionState.
+Also, we explicitly are fine with errors, if there's still some scopes to download. The errors could be because of the missing scope!
+
+app#onxt_001.trades[.date == 'YYYYMMDD']
+.filter_by_type("app").get_by_id("onxt_001").get_field("trades").filter(.equals(.get_field("date"), "YYYYMMDD"))
+
+
+There are two kinds of lazy-loading, exhaustive and non-exhaustive:
+ 1. For exhaustive, we know the full list of (type, id) objects beforehand, and there's not that many. (<1M)
+        The SAP can mark certain types as exhaustive lazy-loading in /hello
+ 2. For non-exhaustive, we don't know ahead of time.
+
+If the shell knows it has all of them, it can then limit any queries to just the objects it actually cares about.
+
+Problem: If just one employee is left, but not because you filtered by id, then there should be an implicit id filter added.
+
+OR just give a list of IDs when querying, SAP can choose to use it
+
+
+
+racks#some_rack.right_neighbor.right_neighbor.right_neighbor
+.filter_by_type("racks").get_by_id("some_rack").get_field("right_neighbor").get_field("right_neighbor").get_field("right_neighbor")
+
+
+Available: rack#some_rack.right_neighbor, rack#rack_002.right_neighbor
+Staged: [Racks(id='some_rack', fields="right_neighbor"), Racks(id="rack_002", fields="right_neighbor")]
+Current: []
+
+
+ALL_SCOPES [Trades(fields="*", conditions=[], sap='tt'), Irrelevant(), Apps]
+
+SCOPES [App(id="onxt_001", fields="trades"), Trades(id="onxt_001", date='YYYYMMDD')]
+
+NEEDED_SCOPES=
+
+
+apps[.host.name == .nvs.host.name]
+
+trades[.cp=="JS"]
+
+#host_001
+
+#host_001.interfaces[0].switch.interfaces[4].switch
+
+#app_001.trades[.date == 'YYYYMMDD']
+
+Each SAP advertises on /hello:
+ 1. A list of Lazy Loaded types it supports. Clients can send LazyQueries for a type to SAPs and they will be executed or declined.
+ 2. A list of type_ids that it supports, to help with infering type when just an id is available.
+
+ObjectList has a list lazy_loaded_object_lists which is a list of LazyLoadedObjectList
+    A LazyLoadedObjectList has a Type, 
+
+
+-----
+
+Executing a query
+
+An operator takes in arguments and optionally a context.
+The special sauce is that there is an all-pervasive context, that passes through most operators, allowing compact syntax.
+
+Now, the ObjectList should be:
+ 1. StagedObjectLists (the ObjectList stack)
+ 2. NeededScopes
+ 3. StagedScopes
+
+Any query can modify the ObjectList
+They still take in the ObjectList as context separately.

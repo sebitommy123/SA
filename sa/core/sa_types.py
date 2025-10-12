@@ -5,6 +5,8 @@ import datetime
 
 if TYPE_CHECKING:
     from sa.core.object_list import ObjectList
+    from sa.core.types import SATypePrimitive, SAType
+    from sa.query_language.query_state import QueryState
 
 class SATypeCustom(ABC):
     name: str = ""
@@ -21,7 +23,7 @@ class SATypeCustom(ABC):
     def validate(self):
         assert False, "validate must be implemented by subclass"
 
-    def resolve(self, all_data: 'ObjectList') -> 'SAType':
+    def resolve(self, query_state: 'QueryState') -> 'SAType':
         assert False, "resolve must be implemented by subclass"
 
     def to_text(self) -> str:
@@ -55,10 +57,9 @@ class SALink(SATypeCustom):
         assert isinstance(self.value["query"], str), "Link query must be a string"
         assert isinstance(self.value["show_text"], str), "Link show_text must be a string"
 
-    def resolve(self, all_data: 'ObjectList') -> 'SAType':
-        assert isinstance(self.value["query"], str)
-        from sa.query_language.execute import execute_query
-        return execute_query(self.value["query"], all_data)
+    def resolve(self, query_state: 'QueryState') -> 'SAType':
+        from sa.query_language.parser import run_query
+        return run_query(self.value["query"], query_state.providers)
     
     def to_text(self) -> str:
         return f"<{self.value['show_text']}>"

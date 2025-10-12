@@ -10,9 +10,11 @@ import requests
 from typing import List, Optional, Union
 from dataclasses import dataclass
 
-from ..core.object_grouping import group_objects
-from ..core.sa_object import SAObject
-from ..core.object_list import ObjectList
+from sa.core.object_grouping import ObjectGrouping, group_objects
+from sa.core.sa_object import SAObject
+from sa.core.object_list import ObjectList
+from sa.core.scope import Scope
+from sa.query_language.query_scope import QueryScope, Scopes
 
 
 @dataclass
@@ -20,18 +22,9 @@ class ProviderConnection:
     """Represents a connection to a provider endpoint."""
     url: str
     name: str = ""
-    mode: str = ""
+    lazy_loading_scopes: List[Scope] = None
     
     def load(self, quiet: bool = False) -> bool:
-        """
-        Load provider information by calling the /hello endpoint.
-        
-        Args:
-            quiet: If True, suppress output messages
-            
-        Returns:
-            True if successful, False otherwise
-        """
         try:
             # Ensure URL ends with /hello
             hello_url = self.url.rstrip('/') + '/hello'
@@ -43,14 +36,30 @@ class ProviderConnection:
             # Parse JSON response
             data = response.json()
             
-            # Extract name and mode
+            # Extract name and lazy loading scopes
             self.name = data.get('name', 'Unknown')
-            self.mode = data.get('mode', 'Unknown')
+            
+            # Convert lazy loading scopes from JSON to Scope objects
+            lazy_scopes_data = data.get('lazy_loading_scopes', [])
+            self.lazy_loading_scopes = []
+            for scope_data in lazy_scopes_data:
+                if isinstance(scope_data, dict) and 'type' in scope_data:
+                    scope = Scope(
+                        type=scope_data['type'],
+                        fields=scope_data.get('fields', '*')
+                    )
+                    self.lazy_loading_scopes.append(scope)
             
             if not quiet:
                 print(f"  ✓ Connected to: {self.name}")
-                print(f"    Mode: {self.mode}")
                 print(f"    URL:  {self.url}")
+                
+                # Log lazy loading scopes (only types, not fields)
+                if self.lazy_loading_scopes:
+                    scope_types = [scope.type for scope in self.lazy_loading_scopes]
+                    print(f"    Lazy loading supported for types: {', '.join(scope_types)}")
+                else:
+                    print(f"    No lazy loading scopes available")
             return True
             
         except requests.exceptions.RequestException as e:
@@ -65,20 +74,8 @@ class ProviderConnection:
             if not quiet:
                 print(f"  ✗ Unexpected error connecting to {self.url}: {e}")
             return False
-    
-    def fetch(self, quiet: bool = False) -> Optional[ObjectList]:
-        """
-        Fetch data from the provider if mode is "ALL_AT_ONCE".
-        
-        Args:
-            quiet: If True, suppress output messages
-            
-        Returns:
-            ObjectList of SAObjects if successful, None otherwise
-        """
-        if self.mode != "ALL_AT_ONCE":
-            return None
-        
+
+    def fetch_initial_data(self, quiet: bool = False) -> list[ObjectGrouping]:
         try:
             # Make GET request to /all_data endpoint
             all_data_url = self.url.rstrip('/') + '/all_data'
@@ -101,7 +98,7 @@ class ProviderConnection:
             
             if not quiet:
                 print(f"    ✓ Fetched {len(sa_objects)} objects")
-            return ObjectList(group_objects(sa_objects))
+            return sa_objects
             
         except requests.exceptions.RequestException as e:
             if not quiet:
@@ -114,8 +111,44 @@ class ProviderConnection:
         except Exception as e:
             raise e
 
+@dataclass
+class Providers:
+    connections: List[ProviderConnection]
+    all_data: ObjectList
 
-def load_providers(providers_file: Union[str, None] = None, quiet: bool = False) -> List[ProviderConnection]:
+    def fetch_initial_data(self, quiet: bool = False) -> ObjectList:
+        all_objects = []
+        
+        for connection in self.connections:
+            if not quiet:
+                print(f"  📥 Fetching from: {connection.name}")
+            data = connection.fetch_initial_data(quiet=quiet)
+            all_objects.extend(data)
+        
+        self.all_data = ObjectList(group_objects(all_objects))
+
+    def print(self) -> None:
+        if not self.connections:
+            print("No providers loaded.")
+            return
+        
+        print(f"📋 Loaded {len(self.connections)} provider(s):")
+        for i, connection in enumerate(self.connections, 1):
+            print(f"  {i}. {connection.name}")
+            print(f"     URL:  {connection.url}")
+            if connection.lazy_loading_scopes:
+                scope_types = [scope.type for scope in connection.lazy_loading_scopes]
+                print(f"     Lazy loading: {', '.join(scope_types)}")
+            print()
+    
+    @property
+    def all_scopes(self) -> list[Scope]:
+        return Scope.union(
+            [scope for connection in self.connections for scope in connection.lazy_loading_scopes]
+        )
+
+
+def load_providers(providers_file: Union[str, None] = None, quiet: bool = False) -> Providers:
     """
     Load provider URLs from a text file and create ProviderConnection objects.
     
@@ -170,61 +203,7 @@ def load_providers(providers_file: Union[str, None] = None, quiet: bool = False)
         if not quiet:
             print(f"✗ Error reading {providers_file}: {e}")
     
-    return connections
-
-
-def fetch_all_providers(connections: List[ProviderConnection], quiet: bool = False) -> ObjectList:
-    """
-    Fetch data from all providers that support ALL_AT_ONCE mode.
-    
-    Args:
-        connections: List of ProviderConnection objects
-        quiet: If True, suppress output messages
-        
-    Returns:
-        Single ObjectList containing all objects from all providers
-    """
-    all_objects = []
-    
-    for connection in connections:
-        if connection.mode == "ALL_AT_ONCE":
-            if not quiet:
-                print(f"  📥 Fetching from: {connection.name}")
-            data = connection.fetch(quiet=quiet)
-            if data:
-                # Extend the list with objects from this provider
-                all_objects.extend(data.objects)
-    
-    return ObjectList(all_objects)
-
-
-def get_provider_count(connections: List[ProviderConnection]) -> int:
-    """
-    Get the count of loaded provider connections.
-    
-    Args:
-        connections: List of ProviderConnection objects
-        
-    Returns:
-        Number of provider connections
-    """
-    return len(connections)
-
-
-def list_providers(connections: List[ProviderConnection]) -> None:
-    """
-    List all loaded provider connections.
-    
-    Args:
-        connections: List of ProviderConnection objects
-    """
-    if not connections:
-        print("No providers loaded.")
-        return
-    
-    print(f"📋 Loaded {len(connections)} provider(s):")
-    for i, connection in enumerate(connections, 1):
-        print(f"  {i}. {connection.name}")
-        print(f"     Mode: {connection.mode}")
-        print(f"     URL:  {connection.url}")
-        print() 
+    return Providers(
+        connections=connections,
+        all_data=ObjectList([])
+    )

@@ -8,10 +8,11 @@ import datetime
 from sa.query_language.errors import QueryError
 from sa.core.sa_types import SATypeCustom, resolve_primitive_recursively
 
-from .types import SATypePrimitive, SAType
+from sa.core.types import SATypePrimitive, SAType
 
 if TYPE_CHECKING:
     from sa.core.object_list import ObjectList
+    from sa.query_language.query_state import QueryState
 
 @dataclass
 class SAObject:
@@ -64,11 +65,11 @@ class SAObject:
     def set_field(self, field_name: str, value: 'SAType'):
         self.json[field_name] = value
 
-    def get_field(self, field_name: str, all_data: 'ObjectList') -> 'SAType':
+    def get_field(self, field_name: str, query_state: 'QueryState') -> 'SAType':
         assert self.has_field(field_name), f"Field {field_name} not found in object {self.id}"
         value = self.json[field_name]
         if isinstance(value, SATypeCustom):
-            return value.resolve(all_data)
+            return value.resolve(query_state)
         return value
     
     def has_field(self, field_name: str) -> bool:

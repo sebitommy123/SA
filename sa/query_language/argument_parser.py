@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from sa.query_language.chain import Operator, OperatorNode, Chain
     from sa.core.object_list import ObjectList
     from sa.query_language.validators import is_valid_primitive
+    from sa.query_language.query_state import QueryState
 
 from sa.query_language.validators import anything, either, is_absorbing_none, is_dict, is_list, is_object_grouping, is_object_list, is_single_object_list
 from sa.query_language.errors import QueryError, assert_query
@@ -90,7 +91,7 @@ class ArgumentParser:
         })
         return self
     
-    def parse(self, context: QueryContext, arguments: Arguments, all_data: ObjectList) -> ParsedArguments:
+    def parse(self, context: QueryContext, arguments: Arguments, query_state: QueryState) -> ParsedArguments:
         assert_query(self.context_spec is not None, f"{self.operator_name} operator must validate context")
         if not self.context_spec['validator'](context):
             if isinstance(context, ObjectList) and len(context.objects) == 1 and self.context_spec['validator'](context.objects[0]):
@@ -104,7 +105,7 @@ class ArgumentParser:
         # Run any chains if the validator doesn't like them
         def run_chain_if_fails_validator(arg, spec):
             if not spec['validator'](arg) and isinstance(arg, Chain):
-                return arg.run(context, all_data)
+                return arg.run(context, query_state)
             return arg
         processed_args = [run_chain_if_fails_validator(arg, spec) for arg, spec in zip(arguments, self.argument_specs)]
         
@@ -121,12 +122,12 @@ class ArgumentParser:
             
         return context, ParsedArguments(**result_kwargs)
 
-def run_all_if_possible(context: ObjectList, arguments: Arguments, all_data: ObjectList) -> list[QueryType]:
+def run_all_if_possible(context: ObjectList, arguments: Arguments, query_state: QueryState) -> list[QueryType]:
     result = []
     for arg in arguments:
         if isinstance(arg, Chain):
             # Run the chain and add the result
-            result.append(arg.run(context, all_data))
+            result.append(arg.run(context, query_state))
         else:
             # Leave primitives as they are
             result.append(arg)

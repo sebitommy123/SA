@@ -4,11 +4,12 @@ from sa.core.object_grouping import ObjectGrouping
 from sa.query_language.errors import QueryError
 from sa.query_language.chain import Operator
 from sa.core.object_list import ObjectList
+from sa.query_language.query_state import QueryState
 
 if TYPE_CHECKING:
     from sa.query_language.types import QueryType, Arguments, QueryContext
 
-def slice_operator_runner(context: QueryContext, arguments: Arguments, all_data: ObjectList) -> QueryType:
+def slice_operator_runner(context: QueryContext, arguments: Arguments, query_state: QueryState) -> QueryType:
     # Handle different context types
     if isinstance(context, ObjectList):
         items = context.objects
