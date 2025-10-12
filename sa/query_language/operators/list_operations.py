@@ -1,9 +1,10 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
+from sa.query_language.query_scope import chain_to_condition
 from sa.query_language.argument_parser import ArgumentParser, run_all_if_possible
 from sa.query_language.validators import is_object_list, is_list, either, is_object_grouping, is_dict
 from sa.query_language.errors import QueryError, assert_query
-from sa.query_language.types import AbsorbingNoneType
+from sa.query_language.types import AbsorbingNone, AbsorbingNoneType
 from sa.query_language.chain import Operator, Chain
 from sa.query_language.utils import flatten_fully
 from sa.core.object_list import ObjectList
@@ -19,6 +20,13 @@ def filter_operator_runner(context: ObjectList, arguments: Arguments, query_stat
     parser.add_arg(Chain, "chain", "The filtering expression must be able to be evaluated on each object to a boolean.")
     parser.validate_context(is_object_list, "You can use the filter operator on an ObjectList.")
     context, args = parser.parse(context, arguments, query_state)
+
+    condition = chain_to_condition(args.chain)
+    if condition:
+        query_state.needed_scopes = query_state.needed_scopes.add_condition(condition)
+    
+    if context is AbsorbingNone:
+        return AbsorbingNone
         
     survivors: list[ObjectGrouping] = []
     for i, grouped_object in enumerate(context.objects):

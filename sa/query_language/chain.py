@@ -1,6 +1,7 @@
 
 from dataclasses import dataclass
 from typing import Callable, Optional
+from sa.core.object_grouping import ObjectGrouping
 from sa.query_language.types import QueryContext, Arguments, QueryType, query_type_to_string
 from sa.core.object_list import ObjectList
 from sa.query_language.errors import print_error_area, QueryArea
@@ -25,7 +26,10 @@ class OperatorNode:
 
     def run(self, context: 'QueryContext', query_state: 'QueryState') -> 'QueryType':
         try:
-            return self.operator.runner(context, self.arguments, query_state)
+            result = self.operator.runner(context, self.arguments, query_state)
+            if isinstance(result, ObjectList) or isinstance(result, ObjectGrouping):
+                query_state.id_types = result.id_types
+            return result
         except Exception as e:
             print("Error while running this area:")
             print_error_area(self.area)

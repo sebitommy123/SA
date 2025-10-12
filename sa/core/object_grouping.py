@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Optional
 from sa.query_language.errors import QueryError
 
 if TYPE_CHECKING:
-    from sa.core.object_list import ObjectList
     from .sa_object import SAObject
+    from sa.core.object_list import ObjectList
     from .types import SAType
     from sa.query_language.query_state import QueryState
 
@@ -19,6 +19,13 @@ class ObjectGrouping:
 
     def __post_init__(self):
         assert len({obj.id for obj in self._objects}) == 1, f"ObjectGrouping has multiple ids: {self._objects}"
+        for obj in self._objects:
+            from sa.core.sa_object import SAObject
+            assert isinstance(obj, SAObject), f"ObjectGrouping must contain SAObject objects, got {type(obj).__name__}"
+
+    def reset(self):
+        self._field_overrides = {}
+        self._selected_fields = None
 
     @property
     def id_types(self) -> set[tuple[str, str]]:
@@ -112,3 +119,9 @@ def group_objects(objects: List['SAObject']) -> List[ObjectGrouping]:
         object_groups.append(ObjectGrouping(objects, {}, None))
     
     return object_groups
+
+def ungroup_objects(object_groups: List[ObjectGrouping]) -> List['SAObject']:
+    return [obj for group in object_groups for obj in group._objects]
+
+def regroup_objects(objects: List['ObjectGrouping']) -> List[ObjectGrouping]:
+    return group_objects(ungroup_objects(objects))

@@ -11,7 +11,7 @@ import argparse
 
 from sa.query_language.query_scope import Scopes
 from sa.query_language.query_state import QueryState
-from sa.query_language.parser import run_query
+from sa.query_language.parser import execute_query, execute_query_fully
 from sa.core.object_list import ObjectList
 from sa.core.object_grouping import ObjectGrouping
 from sa.query_language.render import render_object_as_group, render_object_list
@@ -48,7 +48,7 @@ def print_section_footer():
 def execute_query_shell(query: str, providers: Providers):
     """Execute a query string and return the result."""
     try:
-        result = run_query(query, providers)
+        result = execute_query_fully(query, providers)
         return result, None
     except Exception as e:
         return None, traceback.format_exc()

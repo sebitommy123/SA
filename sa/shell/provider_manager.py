@@ -14,7 +14,7 @@ from sa.core.object_grouping import ObjectGrouping, group_objects
 from sa.core.sa_object import SAObject
 from sa.core.object_list import ObjectList
 from sa.core.scope import Scope
-from sa.query_language.query_scope import QueryScope, Scopes
+from sa.query_language.query_scope import QueryScope
 
 
 @dataclass
@@ -111,10 +111,72 @@ class ProviderConnection:
         except Exception as e:
             raise e
 
+    def fetch_lazy_data(self, query_scope: QueryScope, id_types: set[tuple[str, str]], quiet: bool = False) -> Optional[list[ObjectGrouping]]:
+        """Fetch lazy data from the provider using the /lazy_load endpoint."""
+        try:
+            # Make POST request to /lazy_load endpoint
+            lazy_load_url = self.url.rstrip('/') + '/lazy_load'
+            
+            # Prepare request data
+            request_data = {
+                "scope": {
+                    "type": query_scope.scope.type,
+                    "fields": query_scope.scope.fields
+                },
+                "conditions": query_scope.conditions,
+                "plan_only": False,
+                "id_types": list(id_types)
+            }
+            
+            response = requests.post(lazy_load_url, json=request_data, timeout=30)
+            response.raise_for_status()
+            
+            # Parse JSON response
+            data = response.json()
+            
+            # Extract sa_objects from response
+            sa_objects_data = data.get("sa_objects", [])
+            plan = data.get("plan", {})
+            error = data.get("error", None)
+
+            if error:
+                print(f"\033[91m    ✗ Error: {error}\033[0m")
+                return None
+
+            # Convert each object to SAObject
+            sa_objects = []
+            for obj_data in sa_objects_data:
+                try:
+                    sa_obj = SAObject(obj_data)
+                    sa_objects.append(sa_obj)
+                except Exception as e:
+                    if not quiet:
+                        print(f"    ⚠ Warning: Failed to create SAObject: {e}")
+                    continue
+            if not quiet:
+                print(f"    ✓ Fetched {len(sa_objects)} objects via lazy loading")
+                if plan:
+                    print(f"    📋 Plan: {plan}")
+            return sa_objects
+            
+        except requests.exceptions.RequestException as e:
+            if not quiet:
+                print(f"    ✗ Failed to fetch lazy data: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            if not quiet:
+                print(f"    ✗ Invalid JSON response: {e}")
+            return []
+        except Exception as e:
+            if not quiet:
+                print(f"    ✗ Unexpected error fetching lazy data: {e}")
+            return []
+
 @dataclass
 class Providers:
     connections: List[ProviderConnection]
     all_data: ObjectList
+    downloaded_scopes: list[QueryScope]
 
     def fetch_initial_data(self, quiet: bool = False) -> ObjectList:
         all_objects = []
@@ -126,6 +188,39 @@ class Providers:
             all_objects.extend(data)
         
         self.all_data = ObjectList(group_objects(all_objects))
+
+    def download_scope(self, scopes: QueryScope, id_types: set[tuple[str, str]]):
+        """Download data for the specified scope using lazy loading."""
+        print(f"Downloading scopes: {scopes}")
+        
+        all_objects = []
+        
+        # Find connections that support lazy loading for this scope type
+        scope_type = scopes.scope.type
+        supporting_connections = [
+            conn for conn in self.connections 
+            if conn.lazy_loading_scopes and 
+            any(scope.type == scope_type for scope in conn.lazy_loading_scopes)
+        ]
+        
+        if not supporting_connections:
+            print(f"  ⚠ No providers support lazy loading for type: {scope_type}")
+            return ObjectList([])
+        
+        # Fetch data from each supporting connection
+        for connection in supporting_connections:
+            print(f"  📥 Fetching from: {connection.name}")
+            data = connection.fetch_lazy_data(scopes, id_types, quiet=False)
+            if data is None:
+                return
+            all_objects.extend(data)
+
+        self.all_data = ObjectList.combine(self.all_data, ObjectList(group_objects(all_objects)))
+        
+        # Update downloaded_scopes to track what we've downloaded
+        self.downloaded_scopes.append(scopes.scope)
+        
+        print(f"  ✓ Downloaded {len(all_objects)} objects")
 
     def print(self) -> None:
         if not self.connections:
@@ -205,5 +300,6 @@ def load_providers(providers_file: Union[str, None] = None, quiet: bool = False)
     
     return Providers(
         connections=connections,
-        all_data=ObjectList([])
+        all_data=ObjectList([]),
+        downloaded_scopes=[]
     )

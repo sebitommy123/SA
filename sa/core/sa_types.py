@@ -59,7 +59,8 @@ class SALink(SATypeCustom):
 
     def resolve(self, query_state: 'QueryState') -> 'SAType':
         from sa.query_language.parser import run_query
-        return run_query(self.value["query"], query_state.providers)
+        query_state.stage_scopes()
+        return run_query(self.value["query"], query_state)
     
     def to_text(self) -> str:
         return f"<{self.value['show_text']}>"

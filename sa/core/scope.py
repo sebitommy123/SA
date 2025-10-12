@@ -11,9 +11,9 @@ class Scope:
     
     def __str__(self) -> str:
         if self.fields == "*":
-            return f"Scope(type='{self.type}', fields='*')"
+            return f"{self.type}"
         else:
-            return f"Scope(type='{self.type}', fields={self.fields})"
+            return f"{self.type}[{self.fields}]"
 
     @staticmethod
     def union(scopes: list[Scope]) -> list[Scope]:

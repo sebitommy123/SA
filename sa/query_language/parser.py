@@ -255,7 +255,6 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                 elif token == "[":
                     if token_after == "[":
                         operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index+1, "[", "]", ",")
-                        print(close_paren_index)
                         token_after_close_paren = tokens[close_paren_index + 1] if close_paren_index + 1 < len(tokens) else None
                         if token_after_close_paren != "]":
                             raise QueryError(f"Expected ]], got ]{token_after_close_paren}")
@@ -394,9 +393,7 @@ def parse_query_into_querytype(query: str) -> QueryType:
         raise e
     return result
 
-def run_query(query: str, providers: Providers) -> QueryType:
-    result = None
-    query_state = QueryState.setup(providers)
+def run_query(query: str, query_state: QueryState) -> QueryType:
     try:
         parsed_query = parse_query_into_querytype(query)
         if isinstance(parsed_query, Chain):
@@ -407,6 +404,30 @@ def run_query(query: str, providers: Providers) -> QueryType:
         result = f"Error: {str(e)}"
     except Exception as e:
         raise e
+    return result
 
-    print(query_state.final_needed_scopes)
+def execute_query(query: str, providers: Providers) -> tuple[QueryType, QueryState]:
+    providers.all_data.reset()
+    query_state = QueryState.setup(providers)
+    return run_query(query, query_state), query_state
+
+def execute_query_fully(query: str, providers: Providers) -> QueryType:
+    # Keep executing the query
+    while True:
+        result, final_query_state = execute_query(query, providers)
+        missing_scopes = final_query_state.final_needed_scopes.minus_scopes(providers.downloaded_scopes)
+
+        # Stop once executing the query doesn't return any missing scopes
+        if not missing_scopes.scopes:
+            break
+
+        # Each time, download all the missing scopes
+        for scope in missing_scopes.scopes:
+            providers.download_scope(scope, final_query_state.id_types)
+
+        # If any of the missing scopes can't be downloaded, we can't execute the query
+        still_missing_scopes = final_query_state.final_needed_scopes.minus_scopes(providers.downloaded_scopes)
+        if still_missing_scopes.scopes:
+            return f"Error: Failed to download all scopes: {still_missing_scopes}"
+    
     return result

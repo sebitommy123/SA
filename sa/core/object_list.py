@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from sa.core.object_grouping import ObjectGrouping, group_objects
+from tokenize import group
+from sa.core.object_grouping import ObjectGrouping, group_objects, regroup_objects, ungroup_objects
 
 
 class ObjectList:
@@ -23,6 +24,14 @@ class ObjectList:
         self._build_type_index()
         self._build_id_index()
         self._build_source_index()
+
+    def reset(self):
+        for obj in self._objects:
+            obj.reset()
+
+    @staticmethod
+    def combine(ol1: ObjectList, ol2: ObjectList) -> ObjectList:
+        return ObjectList(regroup_objects(ol1.objects + ol2.objects))
 
     @property
     def objects(self) -> list[ObjectGrouping]:
@@ -99,6 +108,14 @@ class ObjectList:
             uid
             for obj in self._objects
             for uid in obj.unique_ids
+        }
+    
+    @property
+    def id_types(self) -> set[tuple[str, str]]:
+        return {
+            id_type
+            for obj in self._objects
+            for id_type in obj.id_types
         }
     
     def add_object(self, obj: ObjectGrouping):
