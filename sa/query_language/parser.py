@@ -1,11 +1,13 @@
 from dataclasses import dataclass
-from typing import Optional
+from enum import Enum
+from typing import Optional, Union
 import sys
+from sa.query_language.debug import debugger
 from sa.core.object_list import ObjectList
-from sa.query_language.query_scope import Scopes
+from sa.query_language.scopes import Scopes
 from sa.shell.provider_manager import Providers
 from sa.query_language.query_state import QueryState
-from sa.query_language.errors import QueryArea, QueryAreaTerms, QueryError, print_error_area, assert_query
+from sa.query_language.errors import QueryArea, QueryAreaTerms, QueryError, error_area_to_string, assert_query
 from sa.query_language.types import QueryType
 from sa.query_language.chain import Chain, OperatorNode
 from sa.query_language.operators import all_operators
@@ -117,7 +119,7 @@ def accumulate_identifier_tokens(tokens: Tokens, start_index: int, allowed_chars
                     continue
         break
 
-    assert_query(len(accumulated_tokens) > 0, f"Expected identifier at index {start_index}")
+    assert_query(len(accumulated_tokens) > 0, f"Expected identifier at index {start_index}, got {tokens[start_index:scan_index+1]}, {allowed_chars=}")
     return ''.join(accumulated_tokens), scan_index
 
 def get_token_arguments(current_area: QueryArea, tokens: Tokens, current_token_index: int, paren_open: str, paren_close: str, argument_separator: Optional[str]) -> tuple[list[Tokens], int, list[QueryArea]]:
@@ -274,10 +276,20 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                         is_slice_syntax = False
                         if len(operator_token_arguments) == 1:
                             potential_parts = "".join(operator_token_arguments[0]).split(":")
-                            is_slice_syntax = all(part.isdigit() or part == "" for part in potential_parts) and (1 <= len(potential_parts) <= 3)
+                            
+                            def is_valid_slice_part(part):
+                                if part == "":
+                                    return True  # Empty parts are valid (e.g., [:5] or [2:])
+                                try:
+                                    int(part)  # Try to convert to int - handles negative numbers
+                                    return True
+                                except ValueError:
+                                    return False
+                            
+                            is_slice_syntax = all(is_valid_slice_part(part) for part in potential_parts) and (1 <= len(potential_parts) <= 3)
                             
                         if is_slice_syntax:
-                            arguments = [int(part) if part.isdigit() else "" for part in potential_parts]
+                            arguments = [int(part) if part and is_valid_slice_part(part) else "" for part in potential_parts]
                             results.append(OperatorNode(operator=SliceOperator, arguments=arguments, area=new_area))
                             current_token_index = close_paren_index + 1
                         else:
@@ -377,9 +389,8 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                 raise QueryError(f"Invalid state: {current_state}")
             
             assert_query(current_token_index > current_token_index_at_start, f"Token index didn't move forward from {current_token_index_at_start} to {current_token_index} for token {token} in state {current_state}")
-    except Exception as e:
-        print("While parsing this area:")
-        print_error_area(area)
+    except QueryError as e:
+        e.area_stack.append(area)
         raise e
 
     return get_parser_results(results)
@@ -394,6 +405,11 @@ def parse_query_into_querytype(query: str) -> QueryType:
     return result
 
 def run_query(query: str, query_state: QueryState) -> QueryType:
+    debugger.start_part("QUERY", f"Run query")
+    debugger.log("QUERY", query)
+    debugger.log("QUERY_ALL_SCOPES", Scopes(query_state.all_scopes))
+    debugger.log("QUERY_START_SCOPES", Scopes(query_state.final_needed_scopes))
+    debugger.log("QUERY_DOWNLOADED_SCOPES", Scopes(query_state.providers.downloaded_scopes))
     try:
         parsed_query = parse_query_into_querytype(query)
         if isinstance(parsed_query, Chain):
@@ -401,33 +417,68 @@ def run_query(query: str, query_state: QueryState) -> QueryType:
         else:
             result = parsed_query
     except QueryError as e:
-        result = f"Error: {str(e)}"
-    except Exception as e:
-        raise e
+        debugger.end_part(f"Run query")
+        return e
+    debugger.log("QUERY_RESULT", result)
+    debugger.log("QUERY_SCOPES", Scopes(query_state.final_needed_scopes))
+    debugger.end_part(f"Run query")
     return result
 
 def execute_query(query: str, providers: Providers) -> tuple[QueryType, QueryState]:
     providers.all_data.reset()
     query_state = QueryState.setup(providers)
-    return run_query(query, query_state), query_state
+    query_result = run_query(query, query_state)
+    return query_result, query_state
 
-def execute_query_fully(query: str, providers: Providers) -> QueryType:
+def execute_query_fully(query: str, providers: Providers) -> Union[QueryType, QueryError]:
+    failed_scopes = set()
     # Keep executing the query
+    execution_count = 0
     while True:
+        if execution_count > 0:
+            debugger.end_part(f"Execution {execution_count}")
+        execution_count += 1
+        if execution_count > 100:
+            return QueryError(f"Query execution reached maximum number of attempts after {execution_count-1} attempts")
+        debugger.start_part("EXECUTION", f"Execution {execution_count}")
+
         result, final_query_state = execute_query(query, providers)
-        missing_scopes = final_query_state.final_needed_scopes.minus_scopes(providers.downloaded_scopes)
+        if isinstance(result, QueryError) and not result.could_succeed_with_more_data:
+            debugger.log("QUERY_FAILED", f"Query error that couldn't succeed with more data")
+            break
+        missing_scopes = final_query_state.final_needed_scopes - providers.downloaded_scopes
 
         # Stop once executing the query doesn't return any missing scopes
-        if not missing_scopes.scopes:
+        if not missing_scopes:
+            debugger.log("QUERY_SUCCESS", f"Query succeeded with no missing scopes")
             break
 
         # Each time, download all the missing scopes
-        for scope in missing_scopes.scopes:
-            providers.download_scope(scope, final_query_state.id_types)
+        debugger.start_part("SCOPES_DOWNLOAD", f"Downloading missing scopes")
+        debugger.log("MISSING_SCOPES", Scopes(missing_scopes))
+        made_progress = False
+        for scope in missing_scopes:
+            if scope in failed_scopes:
+                debugger.log("INFO", f"Scope {scope} already failed to fetch, skipping")
+                continue
+            if providers.download_scope(scope):
+                debugger.log("SCOPE_DOWNLOAD_SUCCESS", f"Scope {scope} downloaded successfully")
+                made_progress = True
+            else:
+                debugger.log("SCOPE_DOWNLOAD_FAILED", f"Scope {scope} failed to download")
+                failed_scopes.add(scope)
+        debugger.end_part(f"Downloading missing scopes")
 
-        # If any of the missing scopes can't be downloaded, we can't execute the query
-        still_missing_scopes = final_query_state.final_needed_scopes.minus_scopes(providers.downloaded_scopes)
-        if still_missing_scopes.scopes:
-            return f"Error: Failed to download all scopes: {still_missing_scopes}"
+        # If we didn't make any progress, no need to keep trying
+        if not made_progress:
+            if isinstance(result, QueryError) and result.could_succeed_with_more_data:
+                debugger.log("QUERY_MISSING_DATA", f"Query failed because it probably needs more data that it can't get")
+                break
+            else:
+                debugger.log("QUERY_MISSING_DATA", f"Query didn't fail, but probably missing some data")
+                break
+
+    debugger.log("QUERY_RESULT", result)
+    debugger.end_part(f"Execution {execution_count}")
     
     return result

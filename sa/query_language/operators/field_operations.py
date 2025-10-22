@@ -28,7 +28,7 @@ def get_field_operator_runner(context: QueryType, arguments: Arguments, query_st
         if not args.field_name in context:
             if args.return_none_if_missing:
                 return AbsorbingNone
-            raise QueryError(f"Field '{args.field_name}' not found in dict: {context}")
+            raise QueryError(f"Field '{args.field_name}' not found in dict: {context}", could_succeed_with_more_data=True)
         return context[args.field_name]
     
     object_grouping = context
@@ -42,7 +42,7 @@ def get_field_operator_runner(context: QueryType, arguments: Arguments, query_st
     if not object_grouping.has_field(args.field_name):
         if args.return_none_if_missing:
             return AbsorbingNone
-        raise QueryError(f"Field '{args.field_name}' not found in object: {object_grouping}")
+        raise QueryError(f"Field '{args.field_name}' not found in object: {object_grouping}", could_succeed_with_more_data=True)
 
     return object_grouping.get_field(args.field_name, query_state)
 
@@ -90,7 +90,7 @@ def get_field_regex_operator_runner(context: QueryType, arguments: Arguments, qu
         if not matching_fields:
             if args.return_none_if_missing:
                 return AbsorbingNone
-            raise QueryError(f"No fields match regex pattern '{args.regex_pattern}' in dict: {context}")
+            raise QueryError(f"No fields match regex pattern '{args.regex_pattern}' in dict: {context}", could_succeed_with_more_data=True)
         
         if args.return_all_values:
             # Return all values for all matching fields
@@ -110,7 +110,7 @@ def get_field_regex_operator_runner(context: QueryType, arguments: Arguments, qu
     if not matching_fields:
         if args.return_none_if_missing:
             return AbsorbingNone
-        raise QueryError(f"No fields match regex pattern '{args.regex_pattern}' in object: {object_grouping}")
+        raise QueryError(f"No fields match regex pattern '{args.regex_pattern}' in object: {object_grouping}", could_succeed_with_more_data=True)
 
     if args.return_all_values:
         # Return all values for all matching fields from all sources

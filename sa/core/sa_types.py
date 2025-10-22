@@ -3,6 +3,8 @@ from abc import ABC
 from typing import TYPE_CHECKING, Optional
 import datetime
 
+from sa.query_language.errors import QueryError
+
 if TYPE_CHECKING:
     from sa.core.object_list import ObjectList
     from sa.core.types import SATypePrimitive, SAType
@@ -59,8 +61,12 @@ class SALink(SATypeCustom):
 
     def resolve(self, query_state: 'QueryState') -> 'SAType':
         from sa.query_language.parser import run_query
-        query_state.stage_scopes()
-        return run_query(self.value["query"], query_state)
+        query_state.stage()
+        result = run_query(self.value["query"], query_state)
+        if isinstance(result, QueryError):
+            # QueryError is not a valid QueryType, we can't return it
+            raise result
+        return result
     
     def to_text(self) -> str:
         return f"<{self.value['show_text']}>"

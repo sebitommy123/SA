@@ -309,6 +309,23 @@ Problem: If just one employee is left, but not because you filtered by id, then 
 OR just give a list of IDs when querying, SAP can choose to use it
 
 
+Problem: How do I keep track of what I've downloaded?
+ 1. I can cache exact queries, so I don't send them again.
+ 2. The issue is that queries often include many extra conditions that aren't necessary.
+ 3. How can we know which ones the server even cares about? Maybe they can just tell us.
+ 4. For each scope it would tell you the Filtering_Fields and also whether or not it cares about id_types.
+
+id_types is fundamentally flawed
+ 1. It needs to get staged too!
+ 2. At this point it should work like this:
+
+Problem: we can't tell the difference between a real runtime error and just not having enough data. We need to be able to tell the difference. New errors:
+  QueryError -> Has a "could_succeed_with_more_data" option
+    - e.g. [0] index errors always populate this with "true"
+    - e.g. get_field also populates this
+  We always try to get more data (it's required for successful execution).
+  But if we get an error without could_succeed_with_more_data=True, then we just give up and show the error.
+
 
 racks#some_rack.right_neighbor.right_neighbor.right_neighbor
 .filter_by_type("racks").get_by_id("some_rack").get_field("right_neighbor").get_field("right_neighbor").get_field("right_neighbor")

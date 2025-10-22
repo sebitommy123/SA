@@ -6,7 +6,7 @@ from sa.query_language.operators.list_operations import (
     FilterOperator, MapOperator, ForeachOperator, SelectOperator,
     IncludesOperator, FlattenOperator, UniqueOperator
 )
-from sa.query_language.operators.utility import ShowPlanOperator, ToJsonOperator, CountOperator, AnyOperator
+from sa.query_language.operators.utility import ShowPlanOperator, ToJsonOperator, CountOperator, AnyOperator, TypesOperator
 from sa.query_language.operators.object_operations import GetByIdOperator, FilterByTypeOperator, FilterBySourceOperator
 from sa.query_language.operators.analysis import DescribeOperator, SummaryOperator
 from sa.query_language.operators.slice import SliceOperator
@@ -37,4 +37,5 @@ all_operators = [
     DescribeOperator,
     SummaryOperator,
     SliceOperator,
+    TypesOperator,
 ]

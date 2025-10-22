@@ -84,6 +84,7 @@ class ObjectList:
             self._build_source_index()
         
         matching_objects = self._source_index.get(source_name, [])
+        matching_objects = [obj.select_sources({source_name}) for obj in matching_objects]
         
         # Create ObjectList without triggering __post_init__ to avoid rebuilding indexes
         result = ObjectList.__new__(ObjectList)
@@ -117,6 +118,14 @@ class ObjectList:
             for obj in self._objects
             for id_type in obj.id_types
         }
+
+    @property
+    def types(self) -> set[str]:
+        return {
+            type
+            for obj in self._objects
+            for type in obj.types
+        }
     
     def add_object(self, obj: ObjectGrouping):
         uids = obj.unique_ids
@@ -125,7 +134,7 @@ class ObjectList:
     
     def __str__(self) -> str:
         return "ObjectList(" + ", ".join([
-            f"{'|'.join(obj.types)}#{obj.id}"
+            str(obj)
             for obj in self._objects
         ]) + ")"
     

@@ -1,10 +1,12 @@
 
 from dataclasses import dataclass
 from typing import Callable, Optional
+from sa.query_language.scopes import Scopes
+from sa.query_language.debug import debugger
 from sa.core.object_grouping import ObjectGrouping
 from sa.query_language.types import QueryContext, Arguments, QueryType, query_type_to_string
 from sa.core.object_list import ObjectList
-from sa.query_language.errors import print_error_area, QueryArea
+from sa.query_language.errors import QueryError, error_area_to_string, QueryArea
 from sa.query_language.query_state import QueryState
 
 @dataclass
@@ -26,13 +28,21 @@ class OperatorNode:
 
     def run(self, context: 'QueryContext', query_state: 'QueryState') -> 'QueryType':
         try:
+            debugger.start_part("OPERATOR", str(self))
+            debugger.log("OPERATOR_ARGS", ', '.join(query_type_to_string(arg) for arg in self.arguments))
+            debugger.log("OPERATOR_CONTEXT", context)
+            debugger.log("OPERATOR_SCOPES_START", Scopes(query_state.final_needed_scopes))
             result = self.operator.runner(context, self.arguments, query_state)
             if isinstance(result, ObjectList) or isinstance(result, ObjectGrouping):
-                query_state.id_types = result.id_types
+                if result.id_types:
+                    query_state.needed_scopes = query_state.needed_scopes.set_id_types(result.id_types)
+            debugger.log("OPERATOR_RESULT", result)
+            debugger.log("OPERATOR_SCOPES_END", Scopes(query_state.final_needed_scopes))
+            debugger.end_part(str(self))
             return result
-        except Exception as e:
-            print("Error while running this area:")
-            print_error_area(self.area)
+        except QueryError as e:
+            e.area_stack.append(self.area)
+            debugger.end_part(str(self))
             raise e
 
 @dataclass
@@ -49,6 +59,3 @@ class Chain:
         for operator_node in self.operator_nodes:
             context = operator_node.run(context, query_state)
         return context
-
-
-        

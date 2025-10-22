@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
-from sa.query_language.query_scope import chain_to_condition
+from sa.query_language.debug import debugger
+from sa.query_language.scopes import Scopes, chain_to_condition
 from sa.query_language.argument_parser import ArgumentParser, run_all_if_possible
 from sa.query_language.validators import is_object_list, is_list, either, is_object_grouping, is_dict
 from sa.query_language.errors import QueryError, assert_query
@@ -27,20 +28,27 @@ def filter_operator_runner(context: ObjectList, arguments: Arguments, query_stat
     
     if context is AbsorbingNone:
         return AbsorbingNone
-        
+
+    debugger.start_part("FILTER", "Filtering objects")
     survivors: list[ObjectGrouping] = []
     for i, grouped_object in enumerate(context.objects):
-        chain_result = args.chain.run(ObjectList([grouped_object]), query_state)
+        new_state = QueryState.setup(query_state.providers)
+        chain_result = args.chain.run(ObjectList([grouped_object]), new_state)
+        # query_state.staged_scopes.scopes.update(new_state.final_needed_scopes)
+        # TODO: Implement once we have proper named contexts
 
         if isinstance(chain_result, AbsorbingNoneType):
             continue
 
         if not isinstance(chain_result, bool):
+            debugger.end_part("Filtering objects")
             raise QueryError(f"Filter expression for {grouped_object} result must be a boolean, got {type(chain_result).__name__}: {chain_result}")
         
         if chain_result:
             survivors.append(grouped_object)
     
+    debugger.end_part("Filtering objects")
+
     return ObjectList(survivors)
 
 FilterOperator = Operator(
@@ -54,7 +62,8 @@ def map_operator_runner(context: ObjectList, arguments: Arguments, query_state: 
     parser.validate_context(is_object_list, "You can use the map operator on an ObjectList.")
     context, args = parser.parse(context, arguments, query_state)
     
-    results = [args.chain.run(obj, query_state) for obj in context.objects]
+    results = [args.chain.run(obj, QueryState.setup(query_state.providers)) for obj in context.objects]
+    # TODO: Implement once we have proper named contexts
     results = [res for res in results if not isinstance(res, AbsorbingNoneType)]
     if len(results) == 0:
         return []
@@ -100,14 +109,12 @@ def select_operator_runner(context: ObjectList, arguments: Arguments, query_stat
         }
     
     if isinstance(context, ObjectGrouping):
-        return context.select_fields(arguments)
+        return context.select_fields(set(arguments))
     
     if isinstance(context, ObjectList):
         return ObjectList([
-            obj.select_fields(arguments) for obj in context.objects
+            obj.select_fields(set(arguments)) for obj in context.objects
         ])
-    
-    raise QueryError("Unexpected context type in select operator")
 
 SelectOperator = Operator(
     name="select",

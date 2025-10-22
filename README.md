@@ -29,8 +29,8 @@ sa-shell
 # Run a single query
 sa-query ".count()"
 
-# Run with verbose output
-sa-shell -v ".filter(.equals(.get_field('name'), 'John'))"
+# Run a query
+sa-shell ".filter(.equals(.get_field('name'), 'John'))"
 
 # Show help
 sa-shell --help
@@ -194,8 +194,6 @@ The SA framework includes built-in profiling capabilities to help identify perfo
 # Run a single query with profiling
 sa-shell --print-profiling-information "person.count()"
 
-# Run with debug output for detailed investigation
-sa-shell --debug "lol[.best_friend.salary == 85000].count()"
 ```
 
 #### Interactive Shell Profiling
@@ -269,8 +267,8 @@ sa-shell --print-profiling-information "#obj_A"
 # Test complex filtering
 sa-shell --print-profiling-information "lol[.best_friend.salary == 85000].count()"
 
-# Test with debug for detailed breakdown
-sa-shell --debug "lol[.best_friend.salary == 85000].count()" 2>&1 | head -20
+# Test with profiling for detailed breakdown
+sa-shell --print-profiling-information "lol[.best_friend.salary == 85000].count()" 2>&1 | head -20
 ```
 
 #### 3. Compare Performance
@@ -301,7 +299,7 @@ sa-shell --print-profiling-information "optimized_query"
 
 #### 1. Check if Fast Path is Used
 ```bash
-sa-shell --debug "person.count()" 2>&1 | grep -E "(fast path|using fast)"
+sa-shell --print-profiling-information "person.count()" 2>&1 | grep -E "(fast path|using fast)"
 ```
 
 #### 2. Identify Bottlenecks
@@ -356,8 +354,8 @@ $ sa-shell --print-profiling-information "lol[.best_friend.salary == 85000].coun
    count (24.1μs)
 100000
 
-# 3. Investigate with debug
-$ sa-shell --debug "lol[.best_friend.salary == 85000].count()" 2>&1 | head -10
+# 3. Investigate with profiling
+$ sa-shell --print-profiling-information "lol[.best_friend.salary == 85000].count()" 2>&1 | head -10
 [filter operator runner] starting filter operation
 [filter operator runner] context has 100008 objects
 [filter operator runner] detected type filter at start of complex chain, pre-filtering by type: lol

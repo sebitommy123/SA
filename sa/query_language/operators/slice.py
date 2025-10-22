@@ -34,7 +34,7 @@ def slice_operator_runner(context: QueryContext, arguments: Arguments, query_sta
     try:
         result_items = eval(str_to_eval)
     except Exception as e:
-        raise QueryError(f"Error while evaluating \"[{inside_area}]\": {str(e)}")
+        raise QueryError(f"Error while evaluating \"[{inside_area}]\": {str(e)}", could_succeed_with_more_data=True)
     
     # Return appropriate type based on input context
     if isinstance(context, ObjectList) and not isinstance(result_items, ObjectGrouping):

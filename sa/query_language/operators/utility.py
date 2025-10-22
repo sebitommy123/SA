@@ -79,3 +79,20 @@ AnyOperator = Operator(
     name="any",
     runner=any_operator_runner
 )
+
+
+def types_operator_runner(context: QueryContext, arguments: Arguments, query_state: QueryState) -> QueryType:
+    # just returns all the types in the context, deduplicated
+    # context should be an ObjectList
+    parser = ArgumentParser("types")
+    parser.validate_context(is_object_list, "Can only use types operator on an ObjectList")
+    context, args = parser.parse(context, arguments, query_state)
+    
+    context: ObjectList = context
+    return list(context.types)
+
+TypesOperator = Operator(
+    name="types",
+    runner=types_operator_runner
+)
+

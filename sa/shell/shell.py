@@ -9,7 +9,8 @@ import readline
 import sys
 import argparse
 
-from sa.query_language.query_scope import Scopes
+from sa.query_language.errors import QueryError
+from sa.query_language.scopes import Scopes
 from sa.query_language.query_state import QueryState
 from sa.query_language.parser import execute_query, execute_query_fully
 from sa.core.object_list import ObjectList
@@ -17,6 +18,7 @@ from sa.core.object_grouping import ObjectGrouping
 from sa.query_language.render import render_object_as_group, render_object_list
 from sa.shell.provider_manager import Providers, load_providers
 from sa.query_language.chain import Chain
+from sa.query_language.debug import debugger
 import traceback
 
 VERSION = 22
@@ -74,33 +76,30 @@ def format_result(result, show_count: bool = True):
         return str(result)
 
 
-def run_non_interactive(query: str, verbose: bool = False, quiet: bool = False, debug: bool = False):
+def run_non_interactive(query: str, raise_errors: bool = False, debug_file: str = None):
     """Run a single query in non-interactive mode."""
-    if verbose and not quiet:
-        print("🔧 Loading Providers...")
-    
-    providers = load_providers(quiet=quiet)
-    
-    if verbose and not quiet:
-        print(f"📊 Loaded {len(providers.providers)} provider(s)")
-        print("🔧 Fetching Data...")
-    
-    providers.fetch_initial_data(quiet=quiet)
-    
-    if verbose and not quiet:
-        print(f"📊 Loaded {len(providers.all_data.objects)} total objects")
-    
-    # Set debug mode globally if requested
-    if debug:
-        import sa.query_language.operators
-        sa.query_language.operators.DEBUG_ENABLED = True
+    providers = load_providers()
+    providers.fetch_initial_data()
+
+    print("-" * 100)
     
     result, error = execute_query_shell(query, providers)
-    
+
+    if isinstance(result, QueryError):
+        if raise_errors:
+            raise result
+
     if error:
         print(f"Error: {error}")
     else:
         print(format_result(result))
+    
+    if debug_file:
+        print(f"🐛 Saving debug output to: {debug_file}")
+        html_content = debugger.to_html()
+        with open(debug_file, 'w') as f:
+            f.write(html_content)
+        print(f"\n🐛 Debug output saved to: {debug_file}")
 
 
 def main():
@@ -112,10 +111,9 @@ def main():
 Examples:
   %(prog)s                                    # Start interactive shell
   %(prog)s ".equals(.get_field('name'), 'John')"  # Run single query
-  %(prog)s -q ".get_field('department')"     # Run query quietly
-  %(prog)s -v ".filter(.equals(.get_field('salary'), 75000))"  # Run query with verbose output
-  %(prog)s --debug ".equals(.get_field('name'), 'John')"  # Run query with debug output
   %(prog)s --print-profiling-information ".equals(.get_field('name'), 'John')"  # Run query with profiling output
+  %(prog)s --debug result.html ".equals(.get_field('name'), 'John')"  # Run query with debug output to HTML file
+  %(prog)s --raise ".equals(.get_field(\\'name\\'), \\'John\\')"  # Run query and raise QueryError exceptions
   %(prog)s --update                          # Update SA to latest version from GitHub
         """
     )
@@ -123,21 +121,6 @@ Examples:
         'query', 
         nargs='?', 
         help='Query to execute (if not provided, starts interactive shell)'
-    )
-    parser.add_argument(
-        '-v', '--verbose', 
-        action='store_true', 
-        help='Enable verbose output for non-interactive mode'
-    )
-    parser.add_argument(
-        '-q', '--quiet', 
-        action='store_true', 
-        help='Suppress provider loading messages in non-interactive mode'
-    )
-    parser.add_argument(
-        '--debug',
-        action='store_true',
-        help='Enable debug output for operators'
     )
     parser.add_argument(
         '--print-profiling-information',
@@ -148,6 +131,17 @@ Examples:
         '--update',
         action='store_true',
         help='Update SA to the latest version from GitHub'
+    )
+    parser.add_argument(
+        '--raise',
+        dest='raise_errors',
+        action='store_true',
+        help='Raise QueryError exceptions instead of printing them'
+    )
+    parser.add_argument(
+        '--debug',
+        metavar='FILE',
+        help='Save debug output to HTML file (e.g., --debug result.html)'
     )
     
     args = parser.parse_args()
@@ -185,36 +179,28 @@ Examples:
     
     # If a query is provided, run in non-interactive mode
     if args.query:
-        verbose = args.verbose and not args.quiet
-        run_non_interactive(args.query, verbose, args.quiet, args.debug)
+        run_non_interactive(args.query, args.raise_errors, args.debug)
         return
     
     # Otherwise, start interactive shell
     run_interactive_shell(args.debug)
 
 
-def run_interactive_shell(debug: bool = False):
+def run_interactive_shell(debug_file: str = None):
     """Run the interactive shell loop."""
     print_header()
     
     # Load providers at startup
     print_section_header("Loading Providers")
     providers = load_providers()
-    print(f"\n📊 Summary: {len(providers)} provider(s) loaded")
+    print(f"\n📊 Summary: {len(providers.connections)} provider(s) loaded")
     print_section_footer()
-    
+
     # Fetch data from all providers that support ALL_AT_ONCE mode
     print_section_header("Fetching Data")
     providers.fetch_initial_data()
     print(f"\n📊 Summary: {len(providers.all_data._objects)} total objects loaded")
     print_section_footer()
-    
-    # Set debug mode if requested
-    if debug:
-        import sa.query_language.operators
-        sa.query_language.operators.DEBUG_ENABLED = True
-        print("🐛 Debug mode enabled")
-        print()
     
     # Main shell loop
     print("🚀 Ready for queries! Type your commands below:")
@@ -236,7 +222,6 @@ def run_interactive_shell(debug: bool = False):
                 print("\n📖 Available Commands:")
                 print("  help     - Show this help message")
                 print("  refresh  - Reload data from all providers")
-                print("  debug    - Toggle debug mode on/off")
                 print("  quit     - Exit the shell")
                 print("  exit     - Exit the shell")
                 print("  q        - Exit the shell")
@@ -260,14 +245,6 @@ def run_interactive_shell(debug: bool = False):
                 print()
                 continue
             
-            # Check for debug command
-            if user_input.lower() == 'debug':
-                import sa.query_language.operators
-                sa.query_language.operators.DEBUG_ENABLED = not sa.query_language.operators.DEBUG_ENABLED
-                status = "enabled" if sa.query_language.operators.DEBUG_ENABLED else "disabled"
-                print(f"\n🐛 Debug mode {status}")
-                print()
-                continue
             
             # Skip empty input
             if not user_input:
@@ -280,6 +257,13 @@ def run_interactive_shell(debug: bool = False):
                 print(f"❌ Error: {error}")
             else:
                 print(format_result(result, show_count=False))
+            
+            if debug_file:
+                print(f"🐛 Saving debug output to: {debug_file}")
+                html_content = debugger.to_html()
+                with open(debug_file, 'w') as f:
+                    f.write(html_content)
+                print(f"\n🐛 Debug output saved to: {debug_file}")
 
             print()
 

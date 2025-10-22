@@ -22,6 +22,7 @@ class ObjectGrouping:
         for obj in self._objects:
             from sa.core.sa_object import SAObject
             assert isinstance(obj, SAObject), f"ObjectGrouping must contain SAObject objects, got {type(obj).__name__}"
+        assert len({obj.source for obj in self._objects}) == len(self._objects), f"ObjectGrouping has objects from the same source: {self._objects}"
 
     def reset(self):
         self._field_overrides = {}
@@ -70,14 +71,14 @@ class ObjectGrouping:
         return all_fields
 
     def select_fields(self, fields: set[str]) -> ObjectGrouping:
-        return ObjectGrouping(self._objects, self._field_overrides, fields)
+        return ObjectGrouping(self._objects, self._field_overrides, self._selected_fields | fields if self._selected_fields is not None else fields)
 
     def get_field(self, field_name: str, query_state: 'QueryState') -> 'SAType':
         if field_name in self._field_overrides:
             return self._field_overrides[field_name]
         field_values_list = [obj.get_field(field_name, query_state) for obj in self._objects if obj.has_field(field_name)]
         if len(field_values_list) == 0:
-            raise QueryError(f"Object {self} has no field \"{field_name}\"")
+            raise QueryError(f"Object {self} has no field \"{field_name}\"", could_succeed_with_more_data=True)
         any_field_values_are_list_or_dict = any(isinstance(field_value, list) or isinstance(field_value, dict) for field_value in field_values_list)
         if any_field_values_are_list_or_dict:
             if len(field_values_list) > 1:
@@ -99,9 +100,7 @@ class ObjectGrouping:
         return [obj.get_field(field_name, query_state) for obj in self._objects if obj.has_field(field_name)]
 
     def __str__(self) -> str:
-        HEADER_COLOR = "\033[96m"
-        RESET_COLOR = "\033[0m"
-        return f"{HEADER_COLOR}Obj({','.join(self.types)}#{self.id}@{'@'.join(self.sources)}){RESET_COLOR}"
+        return f"Obj({','.join(self.types)}#{self.id}@{'@'.join(self.sources)})"
 
 
 def group_objects(objects: List['SAObject']) -> List[ObjectGrouping]:

@@ -8,7 +8,24 @@ if TYPE_CHECKING:
 
 
 class QueryError(Exception):
-    pass
+    message: str
+    area_stack: list[QueryArea]
+    # This is whether or not more data could potentially resolve this error.
+    could_succeed_with_more_data: bool
+
+    def __init__(self, message: str, could_succeed_with_more_data: bool = False):
+        self.message = message
+        self.area_stack = []
+        self.could_succeed_with_more_data = could_succeed_with_more_data
+        super().__init__(message)
+
+    def __str__(self):
+        result = f"Error: {self.message}"
+        for area in self.area_stack:
+            result += f"\n{error_area_to_string(area)}"
+        if self.could_succeed_with_more_data:
+            result += "\nMaybe missing some data or a provider?"
+        return result
 
 def assert_query(condition: bool, message: str) -> None:
     """Custom assert function that raises QueryError instead of AssertionError."""
@@ -65,7 +82,7 @@ class ProcessingAreaStack:
     def pop(self) -> QueryArea:
         return self.areas.pop()
 
-def print_error_area(area: QueryArea):
+def error_area_to_string(area: QueryArea):
     area_char_terms = area.to_char_terms(area.all_tokens)
     query = "".join(area.all_tokens)
 
@@ -80,7 +97,6 @@ def print_error_area(area: QueryArea):
     # create ^^^^^ icons for the area
     caret_icons = " " * area_char_terms.start_index + "^" * (area_char_terms.end_index - area_char_terms.start_index) + " " * (len(query) - area_char_terms.end_index)
  
-    print(highlighted_query)
-    print(caret_icons)
+    return f"{highlighted_query}\n{caret_icons}"
 
     
