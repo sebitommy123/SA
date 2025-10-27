@@ -47,6 +47,19 @@ def get_tokens_from_query(query: str) -> Tokens:
     
     return tokens
 
+def parse_string_literal(tokens: Tokens, start_index: int) -> tuple[str, int]:
+    quote_type = tokens[start_index]
+    assert quote_type == "'" or quote_type == '"', f"Expected ' or \" at index {start_index}, got {tokens[start_index]}"
+    final_str = ""
+    scan_index = start_index + 1
+    while scan_index < len(tokens):
+        token = tokens[scan_index]
+        if token == quote_type:
+            break
+        final_str += token
+        scan_index += 1
+    return final_str, scan_index
+
 def accumulate_identifier_tokens(tokens: Tokens, start_index: int, allowed_chars: str = "alnum_-") -> tuple[str, int]:
     """Accumulate consecutive tokens based on allowed character types.
 
@@ -77,6 +90,7 @@ def accumulate_identifier_tokens(tokens: Tokens, start_index: int, allowed_chars
     allow_asterisk = '*' in allowed_chars
     allow_pound = '#' in allowed_chars
     allow_at = '@' in allowed_chars
+    allow_slash = '/' in allowed_chars
     
     while scan_index < len(tokens):
         next_token = tokens[scan_index]
@@ -101,6 +115,12 @@ def accumulate_identifier_tokens(tokens: Tokens, start_index: int, allowed_chars
 
         # Check for at token
         if next_token == "@" and allow_at:
+            accumulated_tokens.append(next_token)
+            scan_index += 1
+            continue
+
+        # Check for slash token
+        if next_token == "/" and allow_slash:
             accumulated_tokens.append(next_token)
             scan_index += 1
             continue
@@ -188,9 +208,6 @@ def get_parser_results(results: list[QueryType]) -> QueryType:
 
 
 def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryArea) -> QueryType:
-    current_state = 'start'
-    string_state_quote_type = None
-    string_state_string = ''
     current_token_index = 0
     results: list[QueryType] = []
 
@@ -202,164 +219,42 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
             current_token_index_at_start = current_token_index
             token = tokens[current_token_index]
             token_after = tokens[current_token_index + 1] if current_token_index + 1 < len(tokens) else None
+            token_after_after = tokens[current_token_index + 2] if current_token_index + 2 < len(tokens) else None
             
-            # Skip whitespace tokens when not in string state
-            if current_state != 'string' and token.isspace():
+            if token.isspace():
                 current_token_index += 1
                 continue
                 
-            if current_state == 'start':
-                if token == "*":
-                    assert_query(current_token_index == 0, f"Expected * at start of query, got {token} at index {current_token_index}")
-                    current_token_index += 1
-                elif token == ".":
-                    current_state = 'after_dot'
-                    current_token_index += 1
-                elif token.isdigit():
-                    results.append(int(token))
-                    current_token_index += 1
-                elif token == '"' or token == "'":
-                    string_state_quote_type = token
-                    current_state = 'string'
-                    current_token_index += 1
-                elif token == "true" or token == "false":
-                    results.append(token == "true")
-                    current_token_index += 1
-                elif token == "=":
-                    if token_after == "=":
-                        # == operator
-                        left = get_parser_results(results)
-                        right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
-                        return Chain([OperatorNode(operator=EqualsOperator, arguments=[left, right], area=area)])
-                    elif token_after == "~":
-                        # =~ operator (regex)
-                        left = get_parser_results(results)
-                        right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
-                        return Chain([OperatorNode(operator=RegexEqualsOperator, arguments=[left, right], area=area)])
-                    else:
-                        raise QueryError(f"Expected == or =~, got just one =")
-                elif token == "&":
-                    if token_after == "&":
-                        # && operator
-                        left = get_parser_results(results)
-                        right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
-                        return Chain([OperatorNode(operator=AndOperator, arguments=[left, right])], area=area)
-                    else:
-                        raise QueryError(f"Expected &&, got just one &")
-                elif token == "|":
-                    if token_after == "|":
-                        # || operator
-                        left = get_parser_results(results)
-                        right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
-                        return Chain([OperatorNode(operator=OrOperator, arguments=[left, right])], area=area)
-                    else:
-                        raise QueryError(f"Expected ||, got just one |")
-                elif token == "[":
-                    if token_after == "[":
-                        operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index+1, "[", "]", ",")
-                        token_after_close_paren = tokens[close_paren_index + 1] if close_paren_index + 1 < len(tokens) else None
-                        if token_after_close_paren != "]":
-                            raise QueryError(f"Expected ]], got ]{token_after_close_paren}")
-                        new_area = area[current_token_index:close_paren_index+2]
-                        inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(all_tokens, inside_tokens, arg_area) for inside_tokens, arg_area in zip(operator_token_arguments, argument_areas)]
-                        results.append(OperatorNode(operator=SelectOperator, arguments=inside_querytypes, area=new_area))
-                        current_token_index = close_paren_index + 2
-                    else:
-                        # Check if this is slice syntax [::] or filter syntax [|]
-                        operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index, "[", "]", None)
-                        new_area = area[current_token_index:close_paren_index+1]
-
-                        if len(operator_token_arguments) == 0:
-                            raise QueryError("Empty brackets are meaningless, e.g. []. Wtf do I do with this?")
-                        
-                        # Check if this looks like slice syntax (contains colons and simple numbers)
-                        is_slice_syntax = False
-                        if len(operator_token_arguments) == 1:
-                            potential_parts = "".join(operator_token_arguments[0]).split(":")
-                            
-                            def is_valid_slice_part(part):
-                                if part == "":
-                                    return True  # Empty parts are valid (e.g., [:5] or [2:])
-                                try:
-                                    int(part)  # Try to convert to int - handles negative numbers
-                                    return True
-                                except ValueError:
-                                    return False
-                            
-                            is_slice_syntax = all(is_valid_slice_part(part) for part in potential_parts) and (1 <= len(potential_parts) <= 3)
-                            
-                        if is_slice_syntax:
-                            arguments = [int(part) if part and is_valid_slice_part(part) else "" for part in potential_parts]
-                            results.append(OperatorNode(operator=SliceOperator, arguments=arguments, area=new_area))
-                            current_token_index = close_paren_index + 1
-                        else:
-                            assert_query(len(operator_token_arguments) >= 1 and len(operator_token_arguments) <= 2, f"Expected 1 or 2 arguments, got {len(operator_token_arguments)}")
-                            inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(all_tokens, inside_tokens, arg_area) for inside_tokens, arg_area in zip(operator_token_arguments, argument_areas)]
-                            results.append(OperatorNode(operator=FilterOperator, arguments=inside_querytypes, area=new_area))
-                            current_token_index = close_paren_index + 1
-                elif token == "{":
-                    # This is shorthand for .select(chain, chain, chain, ...)
-                    operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index, "{", "}", ",")
-                    new_area = area[current_token_index:close_paren_index+1]
-                    assert_query(len(operator_token_arguments) > 0, f"Expected at least 1 argument, got {len(operator_token_arguments)}")
-                    inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(all_tokens, inside_tokens, arg_area) for inside_tokens, arg_area in zip(operator_token_arguments, argument_areas)]
-                    results.append(OperatorNode(operator=ForeachOperator, arguments=inside_querytypes, area=new_area))
-                    current_token_index = close_paren_index + 1
-                elif token == "#":
-                    # #<id> is shorthand for [.__id__ == <id>]
-                    accumulated_id, scan_index = accumulate_identifier_tokens(tokens, current_token_index + 1, "alnum_-*")
-                    if "*" in accumulated_id:
-                        accumulated_id = accumulated_id.replace("*", ".*")
-                        accumulated_id = f"^{accumulated_id}$"
-                        results.append(parse_query_into_querytype(
-                            f"[.__id__ =~ '{accumulated_id}']"
-                        ).operator_nodes[0])
-                    else:
-                        results.append(parse_query_into_querytype(
-                            f".get_by_id('{accumulated_id}')"
-                        ).operator_nodes[0])
-                    current_token_index = scan_index
-                elif token == "@":
-                    # @<source> is shorthand for [.__source__ == <source>]
-                    accumulated_source, scan_index = accumulate_identifier_tokens(tokens, current_token_index + 1, "alnum_-")
-                    results.append(parse_query_into_querytype(
-                        f".filter_by_source('{accumulated_source}')"
-                    ).operator_nodes[0])
-                    current_token_index = scan_index
-                else:
-                    assert_query(current_token_index == 0, f"Can only do syntax-free shorthand type filtering at the beginning, got {token} at index {current_token_index}")
-                    # Accumulate type tokens to support hyphenated types
-                    accumulated_type, scan_index = accumulate_identifier_tokens(tokens, current_token_index)
-                    # Is shorthand for .filter(.get_field("__types__").includes(token))
-                    results.append(parse_query_into_querytype(
-                        f".filter_by_type('{accumulated_type}')"
-                    ).operator_nodes[0])
-                    current_token_index = scan_index
-            elif current_state == 'after_dot':
-                if token_after == "(":
-                    operator = next((op for op in all_operators if op.name == token), None)
-                    assert_query(operator, f"Invalid operator: {token}")
-                    operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index + 1, "(", ")", ",")
-                    new_area = area[current_token_index:close_paren_index+1]
-                    if close_paren_index == current_token_index + 2:
+            if token == "*":
+                assert_query(current_token_index == 0, f"Expected * at start of query, got {token} at index {current_token_index}")
+                current_token_index += 1
+            elif token == ".":
+                if current_token_index + 1 == len(tokens):
+                    raise QueryError(f"A dot is the last token?")
+                if token_after_after == "(":
+                    operator = next((op for op in all_operators if op.name == token_after), None)
+                    assert_query(operator, f"Invalid operator: {token_after}")
+                    operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index + 2, "(", ")", ",")
+                    new_area = area[current_token_index+1:close_paren_index+1]
+                    if close_paren_index == current_token_index + 3:
                         parsed_arguments = []
                     else:
                         parsed_arguments: list[QueryType] = [parse_tokens_into_querytype(all_tokens, arg, arg_area) for arg, arg_area in zip(operator_token_arguments, argument_areas)]
                     results.append(OperatorNode(operator=operator, arguments=parsed_arguments, area=new_area))
                     current_token_index = close_paren_index + 1
-                    current_state = 'start'
                 else:
-                    # This is shorthand for .get_field(token)
+                    # This is shorthand for .get_field(token_after)
                     # e.g. .app -> .get_field("app")
                     # Accumulate identifier tokens to support hyphenated field names
-                    if token == "#":
+                    operator = GetFieldOperator
+                    if token_after == "#":
                         field = "__id__"
-                        next_index = current_token_index + 1
-                    elif token == "@":
+                        next_index = current_token_index + 2
+                    elif token_after == "@":
                         field = "__source__"
-                        next_index = current_token_index + 1
+                        next_index = current_token_index + 2
                     else:
-                        accumulated_field, next_index = accumulate_identifier_tokens(tokens, current_token_index, "alnum_-*")
+                        accumulated_field, next_index = accumulate_identifier_tokens(tokens, current_token_index + 1, "alnum_-*")
                         # Convert * to .* for regex wildcard matching
                         field = accumulated_field.replace("*", ".*")
 
@@ -373,22 +268,135 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
                         return_all_values = True
                         next_index += 2
 
-                    new_area = area[current_token_index-1:next_index]
-                    results.append(OperatorNode(operator=GetFieldOperator, arguments=[field, return_none_if_missing, return_all_values], area=new_area))
+                    new_area = area[current_token_index:next_index]
+                    results.append(OperatorNode(operator=operator, arguments=[field, return_none_if_missing, return_all_values], area=new_area))
                     current_token_index = next_index
-                    current_state = 'start'
-            elif current_state == 'string':
-                if token == string_state_quote_type:
-                    results.append(string_state_string)
-                    current_token_index += 1
-                    current_state = 'start'
+            elif token.isdigit():
+                results.append(int(token))
+                current_token_index += 1
+            elif token == '"' or token == "'":
+                string_literal, current_token_index = parse_string_literal(tokens, current_token_index)
+                results.append(string_literal)
+                current_token_index += 1
+            elif token == "true" or token == "false":
+                results.append(token == "true")
+                current_token_index += 1
+            elif token == "=":
+                if token_after == "=":
+                    # == operator
+                    left = get_parser_results(results)
+                    right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
+                    return Chain([OperatorNode(operator=EqualsOperator, arguments=[left, right], area=area)])
+                elif token_after == "~":
+                    # =~ operator (regex)
+                    left = get_parser_results(results)
+                    right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
+                    return Chain([OperatorNode(operator=RegexEqualsOperator, arguments=[left, right], area=area)])
                 else:
-                    string_state_string += token
-                    current_token_index += 1
+                    raise QueryError(f"Expected == or =~, got just one =")
+            elif token == "&":
+                if token_after == "&":
+                    # && operator
+                    left = get_parser_results(results)
+                    right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
+                    return Chain([OperatorNode(operator=AndOperator, arguments=[left, right])], area=area)
+                else:
+                    raise QueryError(f"Expected &&, got just one &")
+            elif token == "|":
+                if token_after == "|":
+                    # || operator
+                    left = get_parser_results(results)
+                    right = parse_tokens_into_querytype(all_tokens, tokens[current_token_index + 2:], area[current_token_index + 2:])
+                    return Chain([OperatorNode(operator=OrOperator, arguments=[left, right])], area=area)
+                else:
+                    raise QueryError(f"Expected ||, got just one |")
+            elif token == "[":
+                if token_after == "[":
+                    operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index+1, "[", "]", ",")
+                    token_after_close_paren = tokens[close_paren_index + 1] if close_paren_index + 1 < len(tokens) else None
+                    if token_after_close_paren != "]":
+                        raise QueryError(f"Expected ]], got ]{token_after_close_paren}")
+                    new_area = area[current_token_index:close_paren_index+2]
+                    inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(all_tokens, inside_tokens, arg_area) for inside_tokens, arg_area in zip(operator_token_arguments, argument_areas)]
+                    results.append(OperatorNode(operator=SelectOperator, arguments=inside_querytypes, area=new_area))
+                    current_token_index = close_paren_index + 2
+                else:
+                    # Check if this is slice syntax [::] or filter syntax [|]
+                    operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index, "[", "]", None)
+                    new_area = area[current_token_index:close_paren_index+1]
+
+                    if len(operator_token_arguments) == 0:
+                        raise QueryError("Empty brackets are meaningless, e.g. []. Wtf do I do with this?")
+                    
+                    # Check if this looks like slice syntax (contains colons and simple numbers)
+                    is_slice_syntax = False
+                    if len(operator_token_arguments) == 1:
+                        potential_parts = "".join(operator_token_arguments[0]).split(":")
+                        
+                        def is_valid_slice_part(part):
+                            if part == "":
+                                return True  # Empty parts are valid (e.g., [:5] or [2:])
+                            try:
+                                int(part)  # Try to convert to int - handles negative numbers
+                                return True
+                            except ValueError:
+                                return False
+                        
+                        is_slice_syntax = all(is_valid_slice_part(part) for part in potential_parts) and (1 <= len(potential_parts) <= 3)
+                        
+                    if is_slice_syntax:
+                        arguments = [int(part) if part and is_valid_slice_part(part) else "" for part in potential_parts]
+                        results.append(OperatorNode(operator=SliceOperator, arguments=arguments, area=new_area))
+                        current_token_index = close_paren_index + 1
+                    else:
+                        assert_query(len(operator_token_arguments) >= 1 and len(operator_token_arguments) <= 2, f"Expected 1 or 2 arguments, got {len(operator_token_arguments)}")
+                        inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(all_tokens, inside_tokens, arg_area) for inside_tokens, arg_area in zip(operator_token_arguments, argument_areas)]
+                        results.append(OperatorNode(operator=FilterOperator, arguments=inside_querytypes, area=new_area))
+                        current_token_index = close_paren_index + 1
+            elif token == "{":
+                # This is shorthand for .select(chain, chain, chain, ...)
+                operator_token_arguments, close_paren_index, argument_areas = get_token_arguments(area, tokens, current_token_index, "{", "}", ",")
+                new_area = area[current_token_index:close_paren_index+1]
+                assert_query(len(operator_token_arguments) > 0, f"Expected at least 1 argument, got {len(operator_token_arguments)}")
+                inside_querytypes: list[QueryType] = [parse_tokens_into_querytype(all_tokens, inside_tokens, arg_area) for inside_tokens, arg_area in zip(operator_token_arguments, argument_areas)]
+                results.append(OperatorNode(operator=ForeachOperator, arguments=inside_querytypes, area=new_area))
+                current_token_index = close_paren_index + 1
+            elif token == "#":
+                # #<id> is shorthand for [.__id__ == <id>]
+                if token_after == "'" or token_after == '"':
+                    accumulated_id, final_quote_index = parse_string_literal(tokens, current_token_index + 1)
+                    scan_index = final_quote_index + 1
+                else:
+                    accumulated_id, scan_index = accumulate_identifier_tokens(tokens, current_token_index + 1, "alnum_-*")
+                if "*" in accumulated_id:
+                    accumulated_id = accumulated_id.replace("*", ".*")
+                    accumulated_id = f"^{accumulated_id}$"
+                    results.append(parse_query_into_querytype(
+                        f"[.__id__ =~ '{accumulated_id}']"
+                    ).operator_nodes[0])
+                else:
+                    results.append(parse_query_into_querytype(
+                        f".get_by_id('{accumulated_id}')"
+                    ).operator_nodes[0])
+                current_token_index = scan_index
+            elif token == "@":
+                # @<source> is shorthand for [.__source__ == <source>]
+                accumulated_source, scan_index = accumulate_identifier_tokens(tokens, current_token_index + 1, "alnum_-")
+                results.append(parse_query_into_querytype(
+                    f".filter_by_source('{accumulated_source}')"
+                ).operator_nodes[0])
+                current_token_index = scan_index
             else:
-                raise QueryError(f"Invalid state: {current_state}")
+                assert_query(current_token_index == 0, f"Can only do syntax-free shorthand type filtering at the beginning, got {token} at index {current_token_index}")
+                # Accumulate type tokens to support hyphenated types
+                accumulated_type, scan_index = accumulate_identifier_tokens(tokens, current_token_index)
+                # Is shorthand for .filter(.get_field("__types__").includes(token))
+                results.append(parse_query_into_querytype(
+                    f".filter_by_type('{accumulated_type}')"
+                ).operator_nodes[0])
+                current_token_index = scan_index
             
-            assert_query(current_token_index > current_token_index_at_start, f"Token index didn't move forward from {current_token_index_at_start} to {current_token_index} for token {token} in state {current_state}")
+            assert_query(current_token_index > current_token_index_at_start, f"Token index didn't move forward from {current_token_index_at_start} to {current_token_index} for token {token}")
     except QueryError as e:
         e.area_stack.append(area)
         raise e

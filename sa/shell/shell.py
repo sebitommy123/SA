@@ -102,6 +102,60 @@ def run_non_interactive(query: str, raise_errors: bool = False, debug_file: str 
         print(f"\n🐛 Debug output saved to: {debug_file}")
 
 
+def add_sap_to_file(sap_endpoint: str):
+    """Add a SAP server endpoint to saps.txt file."""
+    import os
+    
+    # Get the default saps.txt path
+    home_dir = os.path.expanduser("~")
+    sa_dir = os.path.join(home_dir, ".sa")
+    saps_file = os.path.join(sa_dir, "saps.txt")
+    
+    # Create .sa directory if it doesn't exist
+    if not os.path.exists(sa_dir):
+        os.makedirs(sa_dir, exist_ok=True)
+        print(f"📁 Created directory: {sa_dir}")
+    
+    # Validate the endpoint format
+    if '://' in sap_endpoint:
+        # Full URL provided
+        url = sap_endpoint
+        display_endpoint = sap_endpoint
+    else:
+        # ip:port format provided
+        if ':' not in sap_endpoint:
+            print(f"❌ Error: Invalid format. Expected 'ip:port' or 'http://ip:port', got: {sap_endpoint}")
+            print("   Examples: localhost:8080, 192.168.1.100:8080, http://api.example.com")
+            sys.exit(1)
+        url = f"http://{sap_endpoint}"
+        display_endpoint = sap_endpoint
+    
+    # Check if the endpoint already exists
+    existing_endpoints = set()
+    if os.path.exists(saps_file):
+        with open(saps_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    existing_endpoints.add(line)
+    
+    # Check for duplicates
+    if sap_endpoint in existing_endpoints or url in existing_endpoints:
+        print(f"⚠️  Warning: {display_endpoint} is already in saps.txt")
+        return
+    
+    # Add the endpoint to the file
+    need_leading_newline = os.path.exists(saps_file) and os.path.getsize(saps_file) > 0
+    with open(saps_file, 'a') as f:
+        if need_leading_newline:
+            f.write("\n")
+        f.write(f"{sap_endpoint}\n")
+    
+    print(f"✅ Added SAP server: {display_endpoint}")
+    print(f"📄 Updated file: {saps_file}")
+    print(f"💡 You can now run the shell to connect to this SAP server")
+
+
 def main():
     """Main entry point that handles both interactive and non-interactive modes."""
     parser = argparse.ArgumentParser(
@@ -114,6 +168,7 @@ Examples:
   %(prog)s --print-profiling-information ".equals(.get_field('name'), 'John')"  # Run query with profiling output
   %(prog)s --debug result.html ".equals(.get_field('name'), 'John')"  # Run query with debug output to HTML file
   %(prog)s --raise ".equals(.get_field(\\'name\\'), \\'John\\')"  # Run query and raise QueryError exceptions
+  %(prog)s --add-sap localhost:8080          # Add SAP server to saps.txt and exit
   %(prog)s --update                          # Update SA to latest version from GitHub
         """
     )
@@ -142,6 +197,11 @@ Examples:
         '--debug',
         metavar='FILE',
         help='Save debug output to HTML file (e.g., --debug result.html)'
+    )
+    parser.add_argument(
+        '--add-sap',
+        metavar='IP:PORT',
+        help='Add a SAP server to saps.txt and exit (e.g., --add-sap localhost:8080)'
     )
     
     args = parser.parse_args()
@@ -175,6 +235,11 @@ Examples:
             print(f"❌ Unexpected error during update: {e}")
             sys.exit(1)
         
+        return
+    
+    # Handle add-sap command
+    if args.add_sap:
+        add_sap_to_file(args.add_sap)
         return
     
     # If a query is provided, run in non-interactive mode

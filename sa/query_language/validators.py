@@ -19,6 +19,9 @@ def is_dict(qt: QueryType):
 def is_list(qt: QueryType):
     return isinstance(qt, list)
 
+def is_string(qt: QueryType):
+    return isinstance(qt, str)
+
 def is_object_list(qt: QueryType):
     return isinstance(qt, ObjectList)
 

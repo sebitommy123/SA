@@ -24,47 +24,84 @@ class ProviderConnection:
     url: str
     name: str = ""
     lazy_loading_scopes: List[Scope] = None
+    server_type: str = ""  # "SAP" or "Registry"
     
-    def load(self) -> bool:
+    def determine_server_type(self) -> bool:
+        """Determine if this is a SAP or Registry server using /wtf endpoint."""
         try:
-            # Ensure URL ends with /hello
-            hello_url = self.url.rstrip('/') + '/hello'
-            
-            # Make GET request to /hello endpoint
-            response = requests.get(hello_url, timeout=10)
+            wtf_url = self.url.rstrip('/') + '/wtf'
+            response = requests.get(wtf_url, timeout=10)
             response.raise_for_status()
             
-            # Parse JSON response
             data = response.json()
-            
-            # Extract name and lazy loading scopes
-            self.name = data.get('name', 'Unknown')
-            
-            # Convert lazy loading scopes from JSON to Scope objects
-            lazy_scopes_data = data.get('lazy_loading_scopes', [])
-            self.lazy_loading_scopes = []
-            for scope_data in lazy_scopes_data:
-                scope = Scope(
-                    provider=self,
-                    type=scope_data['type'],
-                    fields=scope_data['fields'],
-                    filtering_fields=scope_data['filtering_fields'],
-                    needs_id_types=scope_data['needs_id_types'],
-                    conditions=[],
-                    id_types=set()
-                )
-                self.lazy_loading_scopes.append(scope)
-            
-            print(f"  ✓ Connected to: {self.name}")
-            print(f"    URL:  {self.url}")
-            
-            # Log lazy loading scopes (only types, not fields)
-            if self.lazy_loading_scopes:
-                scope_types = [scope.type for scope in self.lazy_loading_scopes]
-                print(f"    Lazy loading supported for types: {', '.join(scope_types)}")
-            else:
-                print(f"    No lazy loading scopes available")
+            self.server_type = data.get('type', 'Unknown')
             return True
+            
+        except requests.exceptions.RequestException as e:
+            print(f"  ✗ Failed to determine server type for {self.url}: {e}")
+            return False
+        except json.JSONDecodeError as e:
+            print(f"  ✗ Invalid JSON response from {self.url}/wtf: {e}")
+            return False
+        except Exception as e:
+            print(f"  ✗ Unexpected error determining server type for {self.url}: {e}")
+            return False
+
+    def load(self) -> bool:
+        try:
+            # First determine server type
+            if not self.determine_server_type():
+                return False
+            
+            if self.server_type == "Registry":
+                # For registries, we don't need to load provider info
+                self.name = f"Registry at {self.url}"
+                self.lazy_loading_scopes = []
+                print(f"  ✓ Connected to Registry: {self.url}")
+                return True
+            
+            elif self.server_type == "SAP":
+                # For SAP servers, load provider info as before
+                hello_url = self.url.rstrip('/') + '/hello'
+                
+                # Make GET request to /hello endpoint
+                response = requests.get(hello_url, timeout=10)
+                response.raise_for_status()
+                
+                # Parse JSON response
+                data = response.json()
+                
+                # Extract name and lazy loading scopes
+                self.name = data.get('name', 'Unknown')
+                
+                # Convert lazy loading scopes from JSON to Scope objects
+                lazy_scopes_data = data.get('lazy_loading_scopes', [])
+                self.lazy_loading_scopes = []
+                for scope_data in lazy_scopes_data:
+                    scope = Scope(
+                        provider=self,
+                        type=scope_data['type'],
+                        fields=scope_data['fields'],
+                        filtering_fields=scope_data['filtering_fields'],
+                        needs_id_types=scope_data['needs_id_types'],
+                        conditions=[],
+                        id_types=set()
+                    )
+                    self.lazy_loading_scopes.append(scope)
+                
+                print(f"  ✓ Connected to SAP: {self.name}")
+                print(f"    URL:  {self.url}")
+                
+                # Log lazy loading scopes (only types, not fields)
+                if self.lazy_loading_scopes:
+                    scope_types = [scope.type for scope in self.lazy_loading_scopes]
+                    print(f"    Lazy loading supported for types: {', '.join(scope_types)}")
+                else:
+                    print(f"    No lazy loading scopes available")
+                return True
+            else:
+                print(f"  ✗ Unknown server type: {self.server_type}")
+                return False
             
         except requests.exceptions.RequestException as e:
             print(f"  ✗ Failed to connect to {self.url}: {e}")
@@ -107,6 +144,37 @@ class ProviderConnection:
             return None
         except Exception as e:
             raise e
+
+    def fetch_sap_endpoints(self) -> List[str]:
+        """Fetch SAP endpoints from a registry server."""
+        if self.server_type != "Registry":
+            return []
+        
+        try:
+            saps_url = self.url.rstrip('/') + '/saps'
+            response = requests.get(saps_url, timeout=10)
+            response.raise_for_status()
+            
+            # Parse the text response (ip:port format)
+            content = response.text
+            endpoints = []
+            for line in content.split('\n'):
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    # Convert ip:port to full URL
+                    if '://' not in line:
+                        line = f"http://{line}"
+                    endpoints.append(line)
+            
+            print(f"    ✓ Found {len(endpoints)} SAP endpoints in registry")
+            return endpoints
+            
+        except requests.exceptions.RequestException as e:
+            print(f"    ✗ Failed to fetch SAP endpoints from registry: {e}")
+            return []
+        except Exception as e:
+            print(f"    ✗ Unexpected error fetching SAP endpoints: {e}")
+            return []
 
     def fetch_lazy_data(self, scope: Scope) -> tuple[Optional[list[SAObject]], Optional[str]]:
         """Fetch lazy data from the provider using the /lazy_load endpoint."""
@@ -227,18 +295,64 @@ class Providers:
         return {scope for connection in self.connections for scope in connection.lazy_loading_scopes}
 
 
+def discover_sap_servers_recursively(initial_urls: List[str], visited: set = None) -> List[ProviderConnection]:
+    """
+    Recursively discover SAP servers from initial URLs, which may include registries.
+    
+    Args:
+        initial_urls: List of initial URLs to check
+        visited: Set of already visited URLs to prevent infinite loops
+        
+    Returns:
+        List of ProviderConnection objects for SAP servers only
+    """
+    if visited is None:
+        visited = set()
+    
+    sap_connections = []
+    urls_to_process = initial_urls.copy()
+    
+    while urls_to_process:
+        url = urls_to_process.pop(0)
+        
+        # Skip if already visited
+        if url in visited:
+            continue
+        visited.add(url)
+        
+        print(f"  🔍 Discovering: {url}")
+        
+        # Create connection and determine server type
+        connection = ProviderConnection(url=url)
+        if not connection.load():
+            continue
+        
+        if connection.server_type == "SAP":
+            # It's a SAP server, add it to our list
+            sap_connections.append(connection)
+        elif connection.server_type == "Registry":
+            # It's a registry, fetch its SAP endpoints and add them to process
+            print(f"    📋 Registry found, fetching SAP endpoints...")
+            registry_endpoints = connection.fetch_sap_endpoints()
+            for endpoint in registry_endpoints:
+                if endpoint not in visited:
+                    urls_to_process.append(endpoint)
+        else:
+            print(f"    ⚠️  Unknown server type: {connection.server_type}")
+    
+    return sap_connections
+
 def load_providers(providers_file: Union[str, None] = None) -> Providers:
     """
-    Load provider URLs from a text file and create ProviderConnection objects.
+    Load provider URLs from a text file and recursively discover SAP servers.
+    URLs can point to either SAP servers or Registry servers.
     
     Args:
         providers_file: Path to the providers file (defaults to ~/.sa/saps.txt)
         
     Returns:
-        List of ProviderConnection objects
+        Providers object with discovered SAP connections
     """
-    connections = []
-    
     # Default to ~/.sa/saps.txt if no file specified
     if providers_file is None:
         home_dir = os.path.expanduser("~")
@@ -255,28 +369,45 @@ def load_providers(providers_file: Union[str, None] = None) -> Providers:
                 f.write("# SA Provider endpoints\n")
                 f.write("# Add your provider URLs here, one per line\n")
                 f.write("# Lines starting with # are comments\n")
+                f.write("# URLs can point to SAP servers or Registry servers\n")
                 f.write("# Example:\n")
-                f.write("# https://api.example.com\n")
                 f.write("# http://localhost:8080\n")
+                f.write("# http://localhost:8081  # Registry\n")
     
     if not os.path.exists(providers_file):
         print(f"⚠ Warning: {providers_file} not found. No providers loaded.")
-        return connections
+        return Providers(
+            connections=[],
+            all_data=ObjectList([]),
+            downloaded_scopes=set()
+        )
     
-    try:
-        with open(providers_file, 'r') as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                # Skip empty lines and comments
-                if line and not line.startswith('#'):
-                    # Create connection and load provider info
-                    connection = ProviderConnection(url=line)
-                    if connection.load():
-                        connections.append(connection)
-                    else:
-                        print(f"  ✗ Failed to load provider: {line}")
-    except Exception as e:
-        print(f"✗ Error reading {providers_file}: {e}")
+    # Read initial URLs from file
+    initial_urls = []
+    with open(providers_file, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            # Skip empty lines and comments
+            if line and not line.startswith('#'):
+                # Convert ip:port to full URL if needed
+                if '://' not in line:
+                    line = f"http://{line}"
+                initial_urls.append(line)
+    
+    if not initial_urls:
+        print("No URLs found in providers file.")
+        return Providers(
+            connections=[],
+            all_data=ObjectList([]),
+            downloaded_scopes=set()
+        )
+    
+    print(f"🔍 Starting recursive discovery from {len(initial_urls)} initial URL(s)...")
+    
+    # Recursively discover SAP servers
+    connections = discover_sap_servers_recursively(initial_urls)
+    
+    print(f"✅ Discovery complete: Found {len(connections)} SAP server(s)")
     
     return Providers(
         connections=connections,

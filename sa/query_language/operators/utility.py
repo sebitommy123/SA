@@ -1,7 +1,8 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
+from sa.core.object_grouping import ObjectGrouping
 from sa.query_language.argument_parser import ArgumentParser
-from sa.query_language.validators import anything, is_valid_querytype, is_valid_primitive, either, is_object_list, is_list
+from sa.query_language.validators import anything, is_object_grouping, is_valid_querytype, is_valid_primitive, either, is_object_list, is_list
 from sa.query_language.chain import Operator, Chain
 from sa.core.sa_object import SAObject
 from sa.core.object_list import ObjectList
@@ -25,15 +26,13 @@ ShowPlanOperator = Operator(
 
 def to_json_operator_runner(context: QueryType, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("to_json")
-    parser.validate_context(is_valid_querytype)
+    parser.validate_context(either(is_object_list, is_object_grouping), "Can only use to_json operator on a valid query type")
     context, args = parser.parse(context, arguments, query_state)
     
-    if isinstance(context, SAObject):
-        return context.json
-    elif isinstance(context, ObjectList):
-        return [obj.json for obj in context.objects]
-    else:
-        return context
+    if isinstance(context, ObjectList):
+        return [obj.json for group in context._objects for obj in group._objects]
+    elif isinstance(context, ObjectGrouping):
+        return [obj.json for obj in context._objects]
 
 ToJsonOperator = Operator(
     name="to_json",

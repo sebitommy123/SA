@@ -1,7 +1,7 @@
 # Operators package
 from sa.query_language.operators.comparison import EqualsOperator, RegexEqualsOperator
-from sa.query_language.operators.logical import AndOperator, OrOperator
-from sa.query_language.operators.field_operations import GetFieldOperator, HasFieldOperator, GetFieldRegexOperator
+from sa.query_language.operators.logical import AndOperator, OrOperator, AddOperator
+from sa.query_language.operators.field_operations import GetFieldOperator, HasFieldOperator
 from sa.query_language.operators.list_operations import (
     FilterOperator, MapOperator, ForeachOperator, SelectOperator,
     IncludesOperator, FlattenOperator, UniqueOperator
@@ -17,9 +17,9 @@ all_operators = [
     RegexEqualsOperator,
     AndOperator,
     OrOperator,
+    AddOperator,
     GetFieldOperator,
     HasFieldOperator,
-    GetFieldRegexOperator,
     FilterOperator,
     MapOperator,
     ForeachOperator,

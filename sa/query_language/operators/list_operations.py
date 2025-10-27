@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from sa.query_language.debug import debugger
 from sa.query_language.scopes import Scopes, chain_to_condition
 from sa.query_language.argument_parser import ArgumentParser, run_all_if_possible
-from sa.query_language.validators import is_object_list, is_list, either, is_object_grouping, is_dict
+from sa.query_language.validators import is_object_list, is_list, either, is_object_grouping, is_dict, is_string
 from sa.query_language.errors import QueryError, assert_query
 from sa.query_language.types import AbsorbingNone, AbsorbingNoneType
 from sa.query_language.chain import Operator, Chain
@@ -16,10 +16,10 @@ from sa.query_language.query_state import QueryState
 if TYPE_CHECKING:
     from sa.query_language.types import QueryType, Arguments, QueryContext
 
-def filter_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
+def filter_operator_runner(context: QueryContext, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("filter")
     parser.add_arg(Chain, "chain", "The filtering expression must be able to be evaluated on each object to a boolean.")
-    parser.validate_context(is_object_list, "You can use the filter operator on an ObjectList.")
+    parser.validate_context(either(is_object_list, is_list), "You can use the filter operator on an ObjectList or a regular list.")
     context, args = parser.parse(context, arguments, query_state)
 
     condition = chain_to_condition(args.chain)
@@ -30,44 +30,68 @@ def filter_operator_runner(context: ObjectList, arguments: Arguments, query_stat
         return AbsorbingNone
 
     debugger.start_part("FILTER", "Filtering objects")
-    survivors: list[ObjectGrouping] = []
-    for i, grouped_object in enumerate(context.objects):
-        new_state = QueryState.setup(query_state.providers)
-        chain_result = args.chain.run(ObjectList([grouped_object]), new_state)
-        # query_state.staged_scopes.scopes.update(new_state.final_needed_scopes)
-        # TODO: Implement once we have proper named contexts
-
-        if isinstance(chain_result, AbsorbingNoneType):
-            continue
-
-        if not isinstance(chain_result, bool):
-            debugger.end_part("Filtering objects")
-            raise QueryError(f"Filter expression for {grouped_object} result must be a boolean, got {type(chain_result).__name__}: {chain_result}")
-        
-        if chain_result:
-            survivors.append(grouped_object)
     
-    debugger.end_part("Filtering objects")
+    if isinstance(context, ObjectList):
+        survivors: list[ObjectGrouping] = []
+        for i, grouped_object in enumerate(context.objects):
+            new_state = QueryState.setup(query_state.providers)
+            chain_result = args.chain.run(ObjectList([grouped_object]), new_state)
+            # query_state.staged_scopes.scopes.update(new_state.final_needed_scopes)
+            # TODO: Implement once we have proper named contexts
 
-    return ObjectList(survivors)
+            if isinstance(chain_result, AbsorbingNoneType):
+                continue
+
+            if not isinstance(chain_result, bool):
+                debugger.end_part("Filtering objects")
+                raise QueryError(f"Filter expression for {grouped_object} result must be a boolean, got {type(chain_result).__name__}: {chain_result}")
+            
+            if chain_result:
+                survivors.append(grouped_object)
+        
+        debugger.end_part("Filtering objects")
+        return ObjectList(survivors)
+    else:  # Regular Python list
+        survivors = []
+        for item in context:
+            new_state = QueryState.setup(query_state.providers)
+            chain_result = args.chain.run(item, new_state)
+
+            if isinstance(chain_result, AbsorbingNoneType):
+                continue
+
+            if not isinstance(chain_result, bool):
+                debugger.end_part("Filtering objects")
+                raise QueryError(f"Filter expression for {item} result must be a boolean, got {type(chain_result).__name__}: {chain_result}")
+            
+            if chain_result:
+                survivors.append(item)
+        
+        debugger.end_part("Filtering objects")
+        return survivors
 
 FilterOperator = Operator(
     name="filter",
     runner=filter_operator_runner
 )
 
-def map_operator_runner(context: ObjectList, arguments: Arguments, query_state: QueryState) -> QueryType:
+def map_operator_runner(context: QueryContext, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("map")
     parser.add_arg(Chain, "chain", "The mapping expression must be able to be evaluated on each object to a value.")
-    parser.validate_context(is_object_list, "You can use the map operator on an ObjectList.")
+    parser.validate_context(either(is_object_list, is_list), "You can use the map operator on an ObjectList or a regular list.")
     context, args = parser.parse(context, arguments, query_state)
     
-    results = [args.chain.run(obj, QueryState.setup(query_state.providers)) for obj in context.objects]
-    # TODO: Implement once we have proper named contexts
-    results = [res for res in results if not isinstance(res, AbsorbingNoneType)]
-    if len(results) == 0:
-        return []
-    return ObjectList(results) if isinstance(results[0], ObjectGrouping) else results
+    if isinstance(context, ObjectList):
+        results = [args.chain.run(obj, QueryState.setup(query_state.providers)) for obj in context.objects]
+        # TODO: Implement once we have proper named contexts
+        results = [res for res in results if not isinstance(res, AbsorbingNoneType)]
+        if len(results) == 0:
+            return []
+        return ObjectList(results) if isinstance(results[0], ObjectGrouping) else results
+    else:  # Regular Python list
+        results = [args.chain.run(item, QueryState.setup(query_state.providers)) for item in context]
+        results = [res for res in results if not isinstance(res, AbsorbingNoneType)]
+        return results
 
 MapOperator = Operator(
     name="map",
@@ -124,7 +148,7 @@ SelectOperator = Operator(
 def includes_operator_runner(context: SAType, arguments: Arguments, query_state: QueryState) -> QueryType:
     parser = ArgumentParser("includes")
     parser.add_arg(str, "value", "The value to search for must be a string.")
-    parser.validate_context(is_list, "Includes must be called on a list.")
+    parser.validate_context(either(is_list, is_string), "Includes must be called on a list or string.")
     context, args = parser.parse(context, arguments, query_state)
     return args.value in context
 

@@ -12,11 +12,11 @@ class AbsorbingNoneType:
     def __repr__(self):
         return "AbsorbingNone"
     def __str__(self):
-        return "AbsorbingNone"
+        return "Nothing"
 AbsorbingNone = AbsorbingNoneType()
 
 # Type alias for query types
-QueryContext = Union['ObjectList', 'SAType', 'ObjectGrouping', AbsorbingNone]
+QueryContext = Union['ObjectList', 'SAType', 'ObjectGrouping', AbsorbingNoneType]
 QueryType = Union[QueryContext, 'Chain']
 Arguments = list['QueryType']
 
