@@ -206,6 +206,10 @@ Examples:
     
     args = parser.parse_args()
     
+    # Enable debugger if --debug is provided
+    if args.debug:
+        debugger.enable()
+    
     # Handle update command
     if args.update:
         import subprocess

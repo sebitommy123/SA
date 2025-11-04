@@ -1,9 +1,10 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from ast import List
 from typing import TYPE_CHECKING, Optional
 
 from sa.query_language.errors import QueryError
+from sa.core.caches import ObjectGroupingCache
 
 if TYPE_CHECKING:
     from .sa_object import SAObject
@@ -16,31 +17,40 @@ class ObjectGrouping:
     _objects: List[SAObject]
     _field_overrides: dict[str, SAType]
     _selected_fields: Optional[set[str]]
+    _cache: ObjectGroupingCache = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
+        from sa.query_language.debug import debugger
+        debugger.start_part("OBJECT_GROUPING_INIT", "Setting up ObjectGrouping")
         assert len({obj.id for obj in self._objects}) == 1, f"ObjectGrouping has multiple ids: {self._objects}"
         for obj in self._objects:
             from sa.core.sa_object import SAObject
             assert isinstance(obj, SAObject), f"ObjectGrouping must contain SAObject objects, got {type(obj).__name__}"
         assert len({obj.source for obj in self._objects}) == len(self._objects), f"ObjectGrouping has objects from the same source: {self._objects}"
+        # Initialize cache
+        self._cache = ObjectGroupingCache(self)
+        debugger.end_part("Setting up ObjectGrouping")
 
     def reset(self):
-        self._field_overrides = {}
-        self._selected_fields = None
+        """Reset field overrides and selected fields if they are set."""
+        # Only reset if there's actually something to reset
+        if self._field_overrides or self._selected_fields is not None:
+            self._field_overrides = {}
+            self._selected_fields = None
+        # Note: We don't reset cache here because field_overrides/selected_fields
+        # don't affect types/id_types/unique_ids/sources (which are computed from _objects)
 
     @property
     def id_types(self) -> set[tuple[str, str]]:
-        # it's the union of all the id_types of the objects in the object_grouping
-        return set.union(*[set(obj.id_types) for obj in self._objects])
+        return self._cache.id_types()
 
     @property
     def unique_ids(self) -> set[tuple[str, str, str]]:
-        # it's the union of all the unique_ids of the objects in the object_grouping
-        return set.union(*[set(obj.unique_ids) for obj in self._objects])
+        return self._cache.unique_ids()
 
     @property
     def types(self) -> set[str]:
-        return set.union(*[set(obj.types) for obj in self._objects])
+        return self._cache.types()
 
     @property
     def id(self) -> str:
@@ -48,7 +58,7 @@ class ObjectGrouping:
 
     @property
     def sources(self) -> set[str]:
-        return set([obj.source for obj in self._objects])
+        return self._cache.sources()
 
     def has_id_type(self, id_type: tuple[str, str]) -> bool:
         return id_type in self.id_types
@@ -57,6 +67,7 @@ class ObjectGrouping:
         matching_objects = [obj for obj in self._objects if obj.source in sources]
         if len(matching_objects) == 0:
             return None
+        # Create new grouping - cache will be rebuilt automatically when accessed
         return ObjectGrouping(matching_objects, self._field_overrides, self._selected_fields)
     
     @property
@@ -104,6 +115,7 @@ class ObjectGrouping:
 
 
 def group_objects(objects: List['SAObject']) -> List[ObjectGrouping]:
+    from sa.query_language.debug import debugger
     id_to_objects = {}
     
     for obj in objects:
@@ -111,12 +123,14 @@ def group_objects(objects: List['SAObject']) -> List[ObjectGrouping]:
         if obj_id not in id_to_objects:
             id_to_objects[obj_id] = []
         id_to_objects[obj_id].append(obj)
-    
-    # Create ObjectList for each group
+            # Create ObjectList for each group
+    debugger.start_part("GROUP_OBJECTS", "Group objects")
     object_groups = []
     for obj_id, objects in id_to_objects.items():
+        debugger.start_part("GROUP_OBJECTS_OBJECT", "Group objects iter")
         object_groups.append(ObjectGrouping(objects, {}, None))
-    
+        debugger.end_part("Group objects iter")
+    debugger.end_part("Group objects")
     return object_groups
 
 def ungroup_objects(object_groups: List[ObjectGrouping]) -> List['SAObject']:

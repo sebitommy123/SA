@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from sa.core.object_list import ObjectList
     from sa.query_language.query_state import QueryState
 
-@dataclass
+@dataclass(slots=True)
 class SAObject:
     json: dict[str, 'SAType']
 
@@ -27,10 +27,6 @@ class SAObject:
         assert isinstance(self.json["__id__"], str), "Object __id__ field must be a string"
         assert "__source__" in self.json, "Object must have a __source__ field"
         assert isinstance(self.json["__source__"], str), "Object __source__ field must be a string"
-        self.json = {
-            k: resolve_primitive_recursively(v)
-            for k, v in self.json.items()
-        }
 
     @property
     def types(self) -> list[str]:
@@ -46,7 +42,7 @@ class SAObject:
     
     @property
     def properties(self) -> dict[str, 'SAType']:
-        return {k: v for k, v in self.json.items() if k not in ["__types__", "__id__", "__source__"]}
+        return {k: resolve_primitive_recursively(v) for k, v in self.json.items() if k not in ["__types__", "__id__", "__source__"]}
     
     @property
     def unique_ids(self) -> set[tuple[str, str, str]]:
@@ -67,7 +63,7 @@ class SAObject:
 
     def get_field(self, field_name: str, query_state: 'QueryState') -> 'SAType':
         assert self.has_field(field_name), f"Field {field_name} not found in object {self.id}"
-        value = self.json[field_name]
+        value = resolve_primitive_recursively(self.json[field_name])
         if isinstance(value, SATypeCustom):
             return value.resolve(query_state)
         return value

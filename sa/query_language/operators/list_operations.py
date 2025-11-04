@@ -50,7 +50,8 @@ def filter_operator_runner(context: QueryContext, arguments: Arguments, query_st
                 survivors.append(grouped_object)
         
         debugger.end_part("Filtering objects")
-        return ObjectList(survivors)
+        # Pass parent cache - ObjectList will automatically filter it down
+        return ObjectList(survivors, cache=context._cache)
     else:  # Regular Python list
         survivors = []
         for item in context:
@@ -87,7 +88,16 @@ def map_operator_runner(context: QueryContext, arguments: Arguments, query_state
         results = [res for res in results if not isinstance(res, AbsorbingNoneType)]
         if len(results) == 0:
             return []
-        return ObjectList(results) if isinstance(results[0], ObjectGrouping) else results
+        if isinstance(results[0], ObjectGrouping):
+            # Check if results are the same objects (identity check) or new ones
+            # If they're the same, we can reuse cache; otherwise we can't
+            if len(results) == len(context.objects) and all(r is obj for r, obj in zip(results, context.objects)):
+                # Same objects, pass parent cache - ObjectList will automatically filter it down
+                return ObjectList(results, cache=context._cache)
+            else:
+                # New/modified objects, can't reuse cache
+                return ObjectList(results)
+        return results
     else:  # Regular Python list
         results = [args.chain.run(item, QueryState.setup(query_state.providers)) for item in context]
         results = [res for res in results if not isinstance(res, AbsorbingNoneType)]
@@ -136,9 +146,11 @@ def select_operator_runner(context: ObjectList, arguments: Arguments, query_stat
         return context.select_fields(set(arguments))
     
     if isinstance(context, ObjectList):
-        return ObjectList([
-            obj.select_fields(set(arguments)) for obj in context.objects
-        ])
+        # Note: select_fields creates new ObjectGrouping instances, so we can't directly reuse cache
+        # But we can still create a filtered cache for the original objects for potential future use
+        selected_objects = [obj.select_fields(set(arguments)) for obj in context.objects]
+        # Since select_fields creates new objects, we can't reuse the cache directly
+        return ObjectList(selected_objects)
 
 SelectOperator = Operator(
     name="select",

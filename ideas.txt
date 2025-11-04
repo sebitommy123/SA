@@ -1,5 +1,8 @@
 HIGH PRIO
 
+takes too long:
+    host[.apps.map(.component.includes('lol')).count()]
+
 `[]` for lists, * is the item
 
 "has multiple conflicting definitions from different sources." has to be better

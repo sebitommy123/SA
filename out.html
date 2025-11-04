@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html><head>
+<title>SA Query Debug Output</title>
+<meta charset='UTF-8'>
+<style>
+
+        body { 
+            font-family: monospace; 
+            margin: 0; 
+            padding: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .content {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .part { 
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            background: #f8f9fa;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .part-header {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            padding: 4px 7px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .part-header-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+        }
+        .part-header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .part-content {
+            padding: 9px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .log { 
+            padding: 4px 7px;
+            background: white;
+            border-left: 4px solid #3498db;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .log-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .log-header-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+        .log-header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .log-content {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 8px 12px;
+            font-family: monospace;
+            color: #000;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 0.8em;
+            display: none; /* Collapsed by default */
+        }
+        .log.expanded .log-content {
+            display: block;
+        }
+        .log.expanded .log-collapse-btn::after {
+            content: "▼";
+        }
+        .log-collapse-btn::after {
+            content: "▶";
+        }
+        .duration { 
+            color: #27ae60; 
+            font-size: 0.9em; 
+            font-weight: bold;
+            background: #d5f4e6;
+            padding: 4px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+        .timestamp { 
+            color: #7f8c8d; 
+            font-size: 0.8em;
+            background: #ecf0f1;
+            padding: 4px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+        .location { 
+            color: #9b59b6; 
+            font-size: 0.75em;
+            background: #f4ecf7;
+            padding: 3px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            font-family: monospace;
+        }
+        .log-class { 
+            font-weight: bold;
+            padding: 2px 4px;
+            border-radius: 4px;
+            white-space: nowrap;
+            font-size: 0.7em;
+        }
+        .part-class { 
+            font-weight: bold;
+            padding: 4px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+            font-size: 0.9em;
+        }
+        /* Dynamic log class styling based on substrings */
+        .log-class { background: #e8f4fd; color: #2980b9; } /* Default styling */
+        
+        /* Dynamic part class styling based on substrings */
+        .part-class { background: #e8f4fd; color: #2980b9; } /* Default styling */
+        .current-part {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+            padding: 12px 16px;
+            margin-top: 20px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .icon {
+            font-size: 1.2em;
+        }
+        .log-message {
+            flex: 1;
+            min-width: 0;
+            word-break: break-word;
+        }
+        .collapse-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8em;
+            transition: all 0.2s ease;
+        }
+        .collapse-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        .global-controls {
+            background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+            color: white;
+            padding: 15px 20px;
+            text-align: center;
+            border-bottom: 1px solid #34495e;
+        }
+        .global-controls button {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 0 5px;
+            font-family: monospace;
+            font-size: 0.9em;
+            transition: all 0.2s ease;
+        }
+        .global-controls button:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        .part > .part-content {
+            display: none !important; /* Collapsed by default - only direct children */
+        }
+        .part.expanded > .part-content {
+            display: flex !important; /* Expanded - only direct children */
+        }
+        .part.expanded .collapse-btn::after {
+            content: "▼";
+        }
+        .part:not(.expanded) .collapse-btn::after {
+            content: "▶";
+        }
+        .text-output {
+            background: #f8f9fa;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow-x: auto;
+            max-height: none;
+        }
+        @media (max-width: 768px) {
+            .part-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .part-header-right {
+                width: 100%;
+                justify-content: flex-start;
+            }
+            .log-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .log-header-right {
+                width: 100%;
+                justify-content: flex-start;
+            }
+        }
+        
+</style>
+</head><body>
+
+        <script>
+        // Check if ?text is in URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const isTextMode = urlParams.has('text');
+        </script>
+        
+<div id="text-mode-output" style="display: none;">
+<div class="container">
+<div class="header">
+<h1><span class="icon">🐛</span> SA Query Debug Output (Text Mode)</h1>
+<div style="margin-top: 10px; font-size: 0.9em; opacity: 0.9;">Debugger overhead: 42.255s</div>
+</div>
+<div class="global-controls">
+<button onclick="window.location.href=window.location.pathname">View HTML Mode</button>
+</div>
+<div class="text-output"><pre>[INFO] root
+  [LOAD_PROVIDERS] Load providers [sa/shell/provider_manager.py:359 -&gt; sa/shell/provider_manager.py:417] (13.0ms) @ 2025-11-02 17:44:48.702
+  [FETCH_INITIAL_DATA] Fetch initial data [sa/shell/provider_manager.py:238 -&gt; sa/shell/provider_manager.py:248] (55.783s) @ 2025-11-02 17:44:48.715
+    [GROUP_OBJECTS] Group objects [sa/core/object_grouping.py:128 -&gt; sa/core/object_grouping.py:134] (40.744s) @ 2025-11-02 17:44:57.269
+      [GROUP_OBJECTS_OBJECT] Group objects iter [sa/core/object_grouping.py:131 -&gt; sa/core/object_grouping.py:133] (0.093ms) @ 2025-11-02 17:44:57.269
+        [OBJECT_GROUPING_INIT] Setting up ObjectGrouping [sa/core/object_grouping.py:24 -&gt; sa/core/object_grouping.py:32] (0.076ms) @ 2025-11-02 17:44:57.269
+          [TYPES] Get types [sa/core/caches.py:19 -&gt; sa/core/caches.py:21] (0.005ms) @ 2025-11-02 17:44:57.269
+          [ID_TYPES] Get id types [sa/core/caches.py:23 -&gt; sa/core/caches.py:25] (0.007ms) @ 2025-11-02 17:44:57.269
+          [UNIQUE_IDS] Get unique ids [sa/core/caches.py:27 -&gt; sa/core/caches.py:30] (0.005ms) @ 2025-11-02 17:44:57.269
+          [SOURCES] Get sources [sa/core/caches.py:32 -&gt; sa/core/caches.py:34] (0.002ms) @ 2025-11-02 17:44:57.269
+      [GROUP_OBJECTS_OBJECT] Group objects iter [sa/core/object_grouping.py:131 -&gt; sa/core/object_grouping.py:133] (0.057ms) @ 2025-11-02 17:44:57.269
+        [OBJECT_GROUPING_INIT] Setting up ObjectGrouping [sa/core/object_grouping.py:24 -&gt; sa/core/object_grouping.py:32] (0.046ms) @ 2025-11-02 17:44:57.269
+          [TYPES] Get types [sa/core/caches.py:19 -&gt; sa/core/caches.py:21] (0.004ms) @ 2025-11-02 17:44:57.269
+          [ID_TYPES] Get id types [sa/core/caches.py:23 -&gt; sa/core/caches.py:25] (0.002ms) @ 2025-11-02 17:44:57.269
+          [UNIQUE_IDS] Get unique ids [sa/core/caches.py:27 -&gt; sa/core/caches.py:30] (0.002ms) @ 2025-11-02 17:44:57.269
+          [SOURCES] Get sources [sa/core/caches.py:32 -&gt; sa/core/caches.py:34] (0.001ms) @ 2025-11-02 17:44:57.269
+      [GROUP_OBJECTS_OBJECT] Group objects iter [sa/core/object_grouping.py:131 -&gt; sa/core/object_grouping.py:133] (0.052ms) @ 2025-11-02 17:44:57.270
+        [OBJECT_GROUPING_INIT] Setting up ObjectGrouping [sa/core/object_grouping.py:24 -&gt; sa/core/object_grouping.py:32] (0.041ms) @ 2025-11-02 17:44:57.270
+          [TYPES] Get types [sa/core/caches.py:19 -&gt; sa/core/caches.py:21] (0.001ms) @ 2025-11-02 17:44:57.270
+          [ID_TYPES] Get id types [sa/core/caches.py:23 -&gt; sa/core/caches.py:25] (0.002ms) @ 2025-11-02 17:44:57.270
+          [UNIQUE_IDS] Get unique ids [sa/core/caches.py:27 -&gt; sa/core/caches.py:30] (0.002ms) @ 2025-11-02 17:44:57.270
+          [SOURCES] Get sources [sa/core/caches.py:32 -&gt; sa/core/caches.py:34] (0.001ms) @ 2025-11-02 17:44:57.270
+      [GROUP_OBJECTS_OBJECT] Group objects iter [sa/core/object_grouping.py:131 -&gt; sa/core/object_grouping.py:133] (0.050ms) @ 2025-11-02 17:44:57.270
+        [OBJECT_GROUPING_INIT] Setting up ObjectGrouping [sa/core/object_grouping.py:24 -&gt; sa/core/object_grouping.py:32] (0.041ms) @ 2025-11-02 17:44:57.270
+          [TYPES] Get types [sa/core/caches.py:19 -&gt; sa/core/caches.py:21] (0.001ms) @ 2025-11-02 17:44:57.270
+          [ID_TYPES] Get id types [sa/core/caches.py:23 -&gt; sa/core/caches.py:25] (0.002ms) @ 2025-11-02 17:44:57.270
+          [UNIQUE_IDS] Get unique ids [sa/core/caches.py:27 -&gt; sa/core/caches.py:30] (0.001ms) @ 2025-11-02 17:44:57.270
+          [SOURCES] Get sources [sa/core/caches.py:32 -&gt; sa/core/caches.py:34] (0.001ms) @ 2025-11-02 17:44:57.270
+      [GROUP_OBJECTS_OBJECT] Group objects iter (ran 629995 more times...) [sa/core/object_grouping.py:131 -&gt; sa/core/object_grouping.py:133] (40.744s) @ 2025-11-02 17:44:57.270
+        [OBJECT_GROUPING_INIT] Setting up ObjectGrouping [sa/core/object_grouping.py:24 -&gt; sa/core/object_grouping.py:32] (0.515ms) @ 2025-11-02 17:44:57.270
+          [TYPES] Get types [sa/core/caches.py:19 -&gt; sa/core/caches.py:21] (0.002ms) @ 2025-11-02 17:44:57.270
+          [ID_TYPES] Get id types [sa/core/caches.py:23 -&gt; sa/core/caches.py:25] (0.001ms) @ 2025-11-02 17:44:57.270
+          [UNIQUE_IDS] Get unique ids [sa/core/caches.py:27 -&gt; sa/core/caches.py:30] (0.001ms) @ 2025-11-02 17:44:57.270
+          [SOURCES] Get sources [sa/core/caches.py:32 -&gt; sa/core/caches.py:34] (0.001ms) @ 2025-11-02 17:44:57.270
+    [VALIDATE_UNIQUENESS] Validate object uniqueness [sa/core/object_list.py:36 -&gt; sa/core/object_list.py:44] (6.460s) @ 2025-11-02 17:45:38.038
+      [VALIDATE_UNIQUENESS_OBJECT] Validate object uniqueness [sa/core/object_list.py:39 -&gt; sa/core/object_list.py:43] (0.007ms) @ 2025-11-02 17:45:38.038
+      [VALIDATE_UNIQUENESS_OBJECT] Validate object uniqueness [sa/core/object_list.py:39 -&gt; sa/core/object_list.py:43] (0.003ms) @ 2025-11-02 17:45:38.038
+      [VALIDATE_UNIQUENESS_OBJECT] Validate object uniqueness [sa/core/object_list.py:39 -&gt; sa/core/object_list.py:43] (0.002ms) @ 2025-11-02 17:45:38.038
+      [VALIDATE_UNIQUENESS_OBJECT] Validate object uniqueness [sa/core/object_list.py:39 -&gt; sa/core/object_list.py:43] (0.001ms) @ 2025-11-02 17:45:38.038
+      [VALIDATE_UNIQUENESS_OBJECT] Validate object uniqueness (ran 629995 more times...) [sa/core/object_list.py:39 -&gt; sa/core/object_list.py:43] (6.460s) @ 2025-11-02 17:45:38.038
+  [EXECUTION] Execution 1 [sa/query_language/parser.py:466 -&gt; sa/query_language/parser.py:505] (62.0ms) @ 2025-11-02 17:45:44.498
+    [RESET] Reset all data [sa/query_language/parser.py:447 -&gt; sa/query_language/parser.py:449] (61.8ms) @ 2025-11-02 17:45:44.498
+      [RESET_OBJECTS] Reset objects [sa/core/object_list.py:49 -&gt; sa/core/object_list.py:61] (61.8ms) @ 2025-11-02 17:45:44.498
+        [RESET_COUNT] @ 2025-11-02 17:45:44.560 [sa/core/object_list.py:60]
+          Reset 0 out of 630000 objects
+    [SETUP] Setup query state [sa/query_language/parser.py:450 -&gt; sa/query_language/parser.py:452] (0.024ms) @ 2025-11-02 17:45:44.560
+    [QUERY] Run query [sa/query_language/parser.py:421 -&gt; sa/query_language/parser.py:443] (0.117ms) @ 2025-11-02 17:45:44.560
+      [QUERY] @ 2025-11-02 17:45:44.560 [sa/query_language/parser.py:422]
+        &#x27;hi&#x27;
+      [QUERY_ALL_SCOPES] @ 2025-11-02 17:45:44.560 [sa/query_language/parser.py:423]
+        Scopes([])
+      [QUERY_START_SCOPES] @ 2025-11-02 17:45:44.560 [sa/query_language/parser.py:424]
+        Scopes([])
+      [QUERY_DOWNLOADED_SCOPES] @ 2025-11-02 17:45:44.560 [sa/query_language/parser.py:425]
+        Scopes([])
+      [PARSE] Parse query [sa/query_language/parser.py:427 -&gt; sa/query_language/parser.py:429] (0.071ms) @ 2025-11-02 17:45:44.560
+        [TOKENIZE] Tokenize query [sa/query_language/parser.py:407 -&gt; sa/query_language/parser.py:409] (0.009ms) @ 2025-11-02 17:45:44.560
+        [PARSE_TOKENS] Parse tokens into query type [sa/query_language/parser.py:412 -&gt; sa/query_language/parser.py:414] (0.041ms) @ 2025-11-02 17:45:44.560
+      [QUERY_RESULT] @ 2025-11-02 17:45:44.560 [sa/query_language/parser.py:441]
+        hi
+      [QUERY_SCOPES] @ 2025-11-02 17:45:44.560 [sa/query_language/parser.py:442]
+        Scopes([])
+    [QUERY_SUCCESS] @ 2025-11-02 17:45:44.560 [sa/query_language/parser.py:476]
+      Query succeeded with no missing scopes
+    [QUERY_RESULT] @ 2025-11-02 17:45:44.560 [sa/query_language/parser.py:504]
+      hi</pre></div>
+</div>
+</div>
+<div id="html-mode-output" style="display: none;">
+<div class="container">
+<div class="header">
+<h1><span class="icon">🐛</span> SA Query Debug Output</h1>
+<div style="margin-top: 10px; font-size: 0.9em; opacity: 0.9;">Debugger overhead: 42.255s</div>
+</div>
+<div class="global-controls">
+<button onclick="window.location.href=window.location.pathname + '?text'">View Text Mode</button>
+<button onclick="collapseAll()">Collapse All</button>
+<button onclick="expandAll()">Expand All</button>
+<button onclick="collapseAllLogs()">Collapse All Logs</button>
+<button onclick="expandAllLogs()">Expand All Logs</button>
+</div>
+<div class="content">
+<div class="part" data-part-id="part_4340818304">
+<div class="part-header">
+<div class="part-header-left">
+<span class="icon">⚙️</span>
+<span class="part-class INFO">[INFO]</span>
+<span>root</span>
+</div>
+<div class="part-header-right">
+<button class="collapse-btn" onclick="toggleCollapse(this)"></button>
+</div>
+</div>
+<div class="part-content"></div>
+</div>
+<div class="current-part"><span class="icon">📍</span> Current part: root</div>
+</div>
+</div>
+</div>
+
+        <script>
+        if (isTextMode) {
+            document.getElementById('text-mode-output').style.display = 'block';
+        } else {
+            document.getElementById('html-mode-output').style.display = 'block';
+            
+            // Only load JavaScript for HTML mode
+            const debugData = {
+  "id": "part_4340818304",
+  "name": "root",
+  "part_class": "INFO",
+  "start_time": 0.0,
+  "end_time": 0.0,
+  "duration": 0.0,
+  "start_location": null,
+  "end_location": null,
+  "combined_count": 0,
+  "logs": [],
+  "subparts": [
+    {
+      "id": "part_4340091456",
+      "name": "Load providers",
+      "part_class": "LOAD_PROVIDERS",
+      "start_time": 1762127088.702411,
+      "end_time": 1762127088.715395,
+      "duration": 0.012984037399291992,
+      "start_location": "sa/shell/provider_manager.py:359",
+      "end_location": "sa/shell/provider_manager.py:417",
+      "combined_count": 0,
+      "logs": [],
+      "subparts": []
+    },
+    {
+      "id": "part_4339483616",
+      "name": "Fetch initial data",
+      "part_class": "FETCH_INITIAL_DATA",
+      "start_time": 1762127088.715436,
+      "end_time": 1762127144.498427,
+      "duration": 55.7829909324646,
+      "start_location": "sa/shell/provider_manager.py:238",
+      "end_location": "sa/shell/provider_manager.py:248",
+      "combined_count": 0,
+      "logs": [],
+      "subparts": [
+        {
+          "id": "part_4339901808",
+          "name": "Group objects",
+          "part_class": "GROUP_OBJECTS",
+          "start_time": 1762127097.269822,
+          "end_time": 1762127138.014163,
+          "duration": 40.744341135025024,
+          "start_location": "sa/core/object_grouping.py:128",
+          "end_location": "sa/core/object_grouping.py:134",
+          "combined_count": 0,
+          "logs": [],
+          "subparts": [
+            {
+              "id": "part_4329113696",
+              "name": "Group objects iter",
+              "part_class": "GROUP_OBJECTS_OBJECT",
+              "start_time": 1762127097.2698398,
+              "end_time": 1762127097.269933,
+              "duration": 9.322166442871094e-05,
+              "start_location": "sa/core/object_grouping.py:131",
+              "end_location": "sa/core/object_grouping.py:133",
+              "combined_count": 0,
+              "logs": [],
+              "subparts": [
+                {
+                  "id": "part_4341332256",
+                  "name": "Setting up ObjectGrouping",
+                  "part_class": "OBJECT_GROUPING_INIT",
+                  "start_time": 1762127097.269851,
+                  "end_time": 1762127097.269927,
+                  "duration": 7.605552673339844e-05,
+                  "start_location": "sa/core/object_grouping.py:24",
+                  "end_location": "sa/core/object_grouping.py:32",
+                  "combined_count": 0,
+                  "logs": [],
+                  "subparts": [
+                    {
+                      "id": "part_4315118912",
+                      "name": "Get types",
+                      "part_class": "TYPES",
+                      "start_time": 1762127097.269869,
+                      "end_time": 1762127097.2698739,
+                      "duration": 4.76837158203125e-06,
+                      "start_location": "sa/core/caches.py:19",
+                      "end_location": "sa/core/caches.py:21",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_12996612976",
+                      "name": "Get id types",
+                      "part_class": "ID_TYPES",
+                      "start_time": 1762127097.2698848,
+                      "end_time": 1762127097.269892,
+                      "duration": 7.152557373046875e-06,
+                      "start_location": "sa/core/caches.py:23",
+                      "end_location": "sa/core/caches.py:25",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4309259696",
+                      "name": "Get unique ids",
+                      "part_class": "UNIQUE_IDS",
+                      "start_time": 1762127097.2699032,
+                      "end_time": 1762127097.269908,
+                      "duration": 4.76837158203125e-06,
+                      "start_location": "sa/core/caches.py:27",
+                      "end_location": "sa/core/caches.py:30",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4309258448",
+                      "name": "Get sources",
+                      "part_class": "SOURCES",
+                      "start_time": 1762127097.26992,
+                      "end_time": 1762127097.269922,
+                      "duration": 1.9073486328125e-06,
+                      "start_location": "sa/core/caches.py:32",
+                      "end_location": "sa/core/caches.py:34",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "part_4341424656",
+              "name": "Group objects iter",
+              "part_class": "GROUP_OBJECTS_OBJECT",
+              "start_time": 1762127097.269942,
+              "end_time": 1762127097.269999,
+              "duration": 5.698204040527344e-05,
+              "start_location": "sa/core/object_grouping.py:131",
+              "end_location": "sa/core/object_grouping.py:133",
+              "combined_count": 0,
+              "logs": [],
+              "subparts": [
+                {
+                  "id": "part_4341425424",
+                  "name": "Setting up ObjectGrouping",
+                  "part_class": "OBJECT_GROUPING_INIT",
+                  "start_time": 1762127097.269948,
+                  "end_time": 1762127097.269994,
+                  "duration": 4.601478576660156e-05,
+                  "start_location": "sa/core/object_grouping.py:24",
+                  "end_location": "sa/core/object_grouping.py:32",
+                  "combined_count": 0,
+                  "logs": [],
+                  "subparts": [
+                    {
+                      "id": "part_4341422448",
+                      "name": "Get types",
+                      "part_class": "TYPES",
+                      "start_time": 1762127097.269954,
+                      "end_time": 1762127097.2699578,
+                      "duration": 3.814697265625e-06,
+                      "start_location": "sa/core/caches.py:19",
+                      "end_location": "sa/core/caches.py:21",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341422784",
+                      "name": "Get id types",
+                      "part_class": "ID_TYPES",
+                      "start_time": 1762127097.269967,
+                      "end_time": 1762127097.269969,
+                      "duration": 1.9073486328125e-06,
+                      "start_location": "sa/core/caches.py:23",
+                      "end_location": "sa/core/caches.py:25",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341422208",
+                      "name": "Get unique ids",
+                      "part_class": "UNIQUE_IDS",
+                      "start_time": 1762127097.269977,
+                      "end_time": 1762127097.2699788,
+                      "duration": 1.6689300537109375e-06,
+                      "start_location": "sa/core/caches.py:27",
+                      "end_location": "sa/core/caches.py:30",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341424752",
+                      "name": "Get sources",
+                      "part_class": "SOURCES",
+                      "start_time": 1762127097.269988,
+                      "end_time": 1762127097.269989,
+                      "duration": 9.5367431640625e-07,
+                      "start_location": "sa/core/caches.py:32",
+                      "end_location": "sa/core/caches.py:34",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "part_4341425040",
+              "name": "Group objects iter",
+              "part_class": "GROUP_OBJECTS_OBJECT",
+              "start_time": 1762127097.270008,
+              "end_time": 1762127097.27006,
+              "duration": 5.1975250244140625e-05,
+              "start_location": "sa/core/object_grouping.py:131",
+              "end_location": "sa/core/object_grouping.py:133",
+              "combined_count": 0,
+              "logs": [],
+              "subparts": [
+                {
+                  "id": "part_4341425616",
+                  "name": "Setting up ObjectGrouping",
+                  "part_class": "OBJECT_GROUPING_INIT",
+                  "start_time": 1762127097.270014,
+                  "end_time": 1762127097.2700548,
+                  "duration": 4.076957702636719e-05,
+                  "start_location": "sa/core/object_grouping.py:24",
+                  "end_location": "sa/core/object_grouping.py:32",
+                  "combined_count": 0,
+                  "logs": [],
+                  "subparts": [
+                    {
+                      "id": "part_4341425280",
+                      "name": "Get types",
+                      "part_class": "TYPES",
+                      "start_time": 1762127097.27002,
+                      "end_time": 1762127097.2700212,
+                      "duration": 1.1920928955078125e-06,
+                      "start_location": "sa/core/caches.py:19",
+                      "end_location": "sa/core/caches.py:21",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341420336",
+                      "name": "Get id types",
+                      "part_class": "ID_TYPES",
+                      "start_time": 1762127097.270029,
+                      "end_time": 1762127097.2700312,
+                      "duration": 2.1457672119140625e-06,
+                      "start_location": "sa/core/caches.py:23",
+                      "end_location": "sa/core/caches.py:25",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341425664",
+                      "name": "Get unique ids",
+                      "part_class": "UNIQUE_IDS",
+                      "start_time": 1762127097.270039,
+                      "end_time": 1762127097.270041,
+                      "duration": 1.9073486328125e-06,
+                      "start_location": "sa/core/caches.py:27",
+                      "end_location": "sa/core/caches.py:30",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341417888",
+                      "name": "Get sources",
+                      "part_class": "SOURCES",
+                      "start_time": 1762127097.270049,
+                      "end_time": 1762127097.27005,
+                      "duration": 9.5367431640625e-07,
+                      "start_location": "sa/core/caches.py:32",
+                      "end_location": "sa/core/caches.py:34",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "part_4341424848",
+              "name": "Group objects iter",
+              "part_class": "GROUP_OBJECTS_OBJECT",
+              "start_time": 1762127097.270068,
+              "end_time": 1762127097.270118,
+              "duration": 5.0067901611328125e-05,
+              "start_location": "sa/core/object_grouping.py:131",
+              "end_location": "sa/core/object_grouping.py:133",
+              "combined_count": 0,
+              "logs": [],
+              "subparts": [
+                {
+                  "id": "part_4341426048",
+                  "name": "Setting up ObjectGrouping",
+                  "part_class": "OBJECT_GROUPING_INIT",
+                  "start_time": 1762127097.2700732,
+                  "end_time": 1762127097.270114,
+                  "duration": 4.076957702636719e-05,
+                  "start_location": "sa/core/object_grouping.py:24",
+                  "end_location": "sa/core/object_grouping.py:32",
+                  "combined_count": 0,
+                  "logs": [],
+                  "subparts": [
+                    {
+                      "id": "part_4341424608",
+                      "name": "Get types",
+                      "part_class": "TYPES",
+                      "start_time": 1762127097.270079,
+                      "end_time": 1762127097.27008,
+                      "duration": 1.1920928955078125e-06,
+                      "start_location": "sa/core/caches.py:19",
+                      "end_location": "sa/core/caches.py:21",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341424704",
+                      "name": "Get id types",
+                      "part_class": "ID_TYPES",
+                      "start_time": 1762127097.270088,
+                      "end_time": 1762127097.27009,
+                      "duration": 2.1457672119140625e-06,
+                      "start_location": "sa/core/caches.py:23",
+                      "end_location": "sa/core/caches.py:25",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341425328",
+                      "name": "Get unique ids",
+                      "part_class": "UNIQUE_IDS",
+                      "start_time": 1762127097.270098,
+                      "end_time": 1762127097.270099,
+                      "duration": 9.5367431640625e-07,
+                      "start_location": "sa/core/caches.py:27",
+                      "end_location": "sa/core/caches.py:30",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341425472",
+                      "name": "Get sources",
+                      "part_class": "SOURCES",
+                      "start_time": 1762127097.270108,
+                      "end_time": 1762127097.270109,
+                      "duration": 9.5367431640625e-07,
+                      "start_location": "sa/core/caches.py:32",
+                      "end_location": "sa/core/caches.py:34",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "part_4341422160",
+              "name": "Group objects iter",
+              "part_class": "GROUP_OBJECTS_OBJECT",
+              "start_time": 1762127097.270127,
+              "end_time": 1762127138.014158,
+              "duration": 40.74403095245361,
+              "start_location": "sa/core/object_grouping.py:131",
+              "end_location": "sa/core/object_grouping.py:133",
+              "combined_count": 629995,
+              "logs": [],
+              "subparts": [
+                {
+                  "id": "part_4341425808",
+                  "name": "Setting up ObjectGrouping",
+                  "part_class": "OBJECT_GROUPING_INIT",
+                  "start_time": 1762127097.270132,
+                  "end_time": 1762127097.270647,
+                  "duration": 0.000514984130859375,
+                  "start_location": "sa/core/object_grouping.py:24",
+                  "end_location": "sa/core/object_grouping.py:32",
+                  "combined_count": 0,
+                  "logs": [],
+                  "subparts": [
+                    {
+                      "id": "part_4340095632",
+                      "name": "Get types",
+                      "part_class": "TYPES",
+                      "start_time": 1762127097.2706099,
+                      "end_time": 1762127097.270612,
+                      "duration": 2.1457672119140625e-06,
+                      "start_location": "sa/core/caches.py:19",
+                      "end_location": "sa/core/caches.py:21",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4340090832",
+                      "name": "Get id types",
+                      "part_class": "ID_TYPES",
+                      "start_time": 1762127097.270622,
+                      "end_time": 1762127097.270623,
+                      "duration": 9.5367431640625e-07,
+                      "start_location": "sa/core/caches.py:23",
+                      "end_location": "sa/core/caches.py:25",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341425760",
+                      "name": "Get unique ids",
+                      "part_class": "UNIQUE_IDS",
+                      "start_time": 1762127097.270632,
+                      "end_time": 1762127097.270633,
+                      "duration": 9.5367431640625e-07,
+                      "start_location": "sa/core/caches.py:27",
+                      "end_location": "sa/core/caches.py:30",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    },
+                    {
+                      "id": "part_4341425136",
+                      "name": "Get sources",
+                      "part_class": "SOURCES",
+                      "start_time": 1762127097.2706418,
+                      "end_time": 1762127097.270643,
+                      "duration": 1.1920928955078125e-06,
+                      "start_location": "sa/core/caches.py:32",
+                      "end_location": "sa/core/caches.py:34",
+                      "combined_count": 0,
+                      "logs": [],
+                      "subparts": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "part_13741124992",
+          "name": "Validate object uniqueness",
+          "part_class": "VALIDATE_UNIQUENESS",
+          "start_time": 1762127138.038212,
+          "end_time": 1762127144.498393,
+          "duration": 6.460180997848511,
+          "start_location": "sa/core/object_list.py:36",
+          "end_location": "sa/core/object_list.py:44",
+          "combined_count": 0,
+          "logs": [],
+          "subparts": [
+            {
+              "id": "part_13741124368",
+              "name": "Validate object uniqueness",
+              "part_class": "VALIDATE_UNIQUENESS_OBJECT",
+              "start_time": 1762127138.038222,
+              "end_time": 1762127138.038229,
+              "duration": 6.9141387939453125e-06,
+              "start_location": "sa/core/object_list.py:39",
+              "end_location": "sa/core/object_list.py:43",
+              "combined_count": 0,
+              "logs": [],
+              "subparts": []
+            },
+            {
+              "id": "part_13741129408",
+              "name": "Validate object uniqueness",
+              "part_class": "VALIDATE_UNIQUENESS_OBJECT",
+              "start_time": 1762127138.038238,
+              "end_time": 1762127138.038241,
+              "duration": 2.86102294921875e-06,
+              "start_location": "sa/core/object_list.py:39",
+              "end_location": "sa/core/object_list.py:43",
+              "combined_count": 0,
+              "logs": [],
+              "subparts": []
+            },
+            {
+              "id": "part_13741128880",
+              "name": "Validate object uniqueness",
+              "part_class": "VALIDATE_UNIQUENESS_OBJECT",
+              "start_time": 1762127138.038249,
+              "end_time": 1762127138.038251,
+              "duration": 1.9073486328125e-06,
+              "start_location": "sa/core/object_list.py:39",
+              "end_location": "sa/core/object_list.py:43",
+              "combined_count": 0,
+              "logs": [],
+              "subparts": []
+            },
+            {
+              "id": "part_13741128448",
+              "name": "Validate object uniqueness",
+              "part_class": "VALIDATE_UNIQUENESS_OBJECT",
+              "start_time": 1762127138.038259,
+              "end_time": 1762127138.03826,
+              "duration": 9.5367431640625e-07,
+              "start_location": "sa/core/object_list.py:39",
+              "end_location": "sa/core/object_list.py:43",
+              "combined_count": 0,
+              "logs": [],
+              "subparts": []
+            },
+            {
+              "id": "part_13741128208",
+              "name": "Validate object uniqueness",
+              "part_class": "VALIDATE_UNIQUENESS_OBJECT",
+              "start_time": 1762127138.0382679,
+              "end_time": 1762127144.4983811,
+              "duration": 6.460113286972046,
+              "start_location": "sa/core/object_list.py:39",
+              "end_location": "sa/core/object_list.py:43",
+              "combined_count": 629995,
+              "logs": [],
+              "subparts": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "part_13741128256",
+      "name": "Execution 1",
+      "part_class": "EXECUTION",
+      "start_time": 1762127144.498515,
+      "end_time": 1762127144.560513,
+      "duration": 0.06199812889099121,
+      "start_location": "sa/query_language/parser.py:466",
+      "end_location": "sa/query_language/parser.py:505",
+      "combined_count": 0,
+      "logs": [
+        {
+          "message": "Query succeeded with no missing scopes",
+          "timestamp": 1762127144.560506,
+          "log_class": "QUERY_SUCCESS",
+          "file_location": "sa/query_language/parser.py:476"
+        },
+        {
+          "message": "hi",
+          "timestamp": 1762127144.5605109,
+          "log_class": "QUERY_RESULT",
+          "file_location": "sa/query_language/parser.py:504"
+        }
+      ],
+      "subparts": [
+        {
+          "id": "part_13740982048",
+          "name": "Reset all data",
+          "part_class": "RESET",
+          "start_time": 1762127144.498528,
+          "end_time": 1762127144.560334,
+          "duration": 0.06180596351623535,
+          "start_location": "sa/query_language/parser.py:447",
+          "end_location": "sa/query_language/parser.py:449",
+          "combined_count": 0,
+          "logs": [],
+          "subparts": [
+            {
+              "id": "part_13740975664",
+              "name": "Reset objects",
+              "part_class": "RESET_OBJECTS",
+              "start_time": 1762127144.498549,
+              "end_time": 1762127144.5603268,
+              "duration": 0.06177783012390137,
+              "start_location": "sa/core/object_list.py:49",
+              "end_location": "sa/core/object_list.py:61",
+              "combined_count": 0,
+              "logs": [
+                {
+                  "message": "Reset 0 out of 630000 objects",
+                  "timestamp": 1762127144.560315,
+                  "log_class": "RESET_COUNT",
+                  "file_location": "sa/core/object_list.py:60"
+                }
+              ],
+              "subparts": []
+            }
+          ]
+        },
+        {
+          "id": "part_4340277248",
+          "name": "Setup query state",
+          "part_class": "SETUP",
+          "start_time": 1762127144.5603452,
+          "end_time": 1762127144.560369,
+          "duration": 2.384185791015625e-05,
+          "start_location": "sa/query_language/parser.py:450",
+          "end_location": "sa/query_language/parser.py:452",
+          "combined_count": 0,
+          "logs": [],
+          "subparts": []
+        },
+        {
+          "id": "part_13741066240",
+          "name": "Run query",
+          "part_class": "QUERY",
+          "start_time": 1762127144.5603788,
+          "end_time": 1762127144.560496,
+          "duration": 0.00011730194091796875,
+          "start_location": "sa/query_language/parser.py:421",
+          "end_location": "sa/query_language/parser.py:443",
+          "combined_count": 0,
+          "logs": [
+            {
+              "message": "'hi'",
+              "timestamp": 1762127144.560385,
+              "log_class": "QUERY",
+              "file_location": "sa/query_language/parser.py:422"
+            },
+            {
+              "message": "Scopes([])",
+              "timestamp": 1762127144.560392,
+              "log_class": "QUERY_ALL_SCOPES",
+              "file_location": "sa/query_language/parser.py:423"
+            },
+            {
+              "message": "Scopes([])",
+              "timestamp": 1762127144.560398,
+              "log_class": "QUERY_START_SCOPES",
+              "file_location": "sa/query_language/parser.py:424"
+            },
+            {
+              "message": "Scopes([])",
+              "timestamp": 1762127144.5604029,
+              "log_class": "QUERY_DOWNLOADED_SCOPES",
+              "file_location": "sa/query_language/parser.py:425"
+            },
+            {
+              "message": "hi",
+              "timestamp": 1762127144.56049,
+              "log_class": "QUERY_RESULT",
+              "file_location": "sa/query_language/parser.py:441"
+            },
+            {
+              "message": "Scopes([])",
+              "timestamp": 1762127144.5604951,
+              "log_class": "QUERY_SCOPES",
+              "file_location": "sa/query_language/parser.py:442"
+            }
+          ],
+          "subparts": [
+            {
+              "id": "part_13741065376",
+              "name": "Parse query",
+              "part_class": "PARSE",
+              "start_time": 1762127144.560408,
+              "end_time": 1762127144.560479,
+              "duration": 7.081031799316406e-05,
+              "start_location": "sa/query_language/parser.py:427",
+              "end_location": "sa/query_language/parser.py:429",
+              "combined_count": 0,
+              "logs": [],
+              "subparts": [
+                {
+                  "id": "part_13741065424",
+                  "name": "Tokenize query",
+                  "part_class": "TOKENIZE",
+                  "start_time": 1762127144.560415,
+                  "end_time": 1762127144.5604239,
+                  "duration": 8.821487426757812e-06,
+                  "start_location": "sa/query_language/parser.py:407",
+                  "end_location": "sa/query_language/parser.py:409",
+                  "combined_count": 0,
+                  "logs": [],
+                  "subparts": []
+                },
+                {
+                  "id": "part_13741065760",
+                  "name": "Parse tokens into query type",
+                  "part_class": "PARSE_TOKENS",
+                  "start_time": 1762127144.560433,
+                  "end_time": 1762127144.5604742,
+                  "duration": 4.124641418457031e-05,
+                  "start_location": "sa/query_language/parser.py:412",
+                  "end_location": "sa/query_language/parser.py:414",
+                  "combined_count": 0,
+                  "logs": [],
+                  "subparts": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+};
+        
+        function toggleCollapse(element) {
+            const part = element.closest('.part');
+            const partId = part.dataset.partId;
+            
+            console.log('Toggle collapse clicked, part:', part, 'expanded:', part.classList.contains('expanded'));
+            
+            if (part.classList.contains('expanded')) {
+                // Collapsing - just remove the expanded class
+                console.log('Collapsing part');
+                part.classList.remove('expanded');
+            } else {
+                // Expanding - add expanded class and load content if needed
+                console.log('Expanding part');
+                part.classList.add('expanded');
+                if (!part.dataset.loaded) {
+                    loadPartContent(partId);
+                    part.dataset.loaded = 'true';
+                }
+            }
+        }
+        
+        function toggleLogCollapse(element) {
+            const log = element.closest('.log');
+            log.classList.toggle('expanded');
+        }
+        
+        function collapseAll() {
+            const parts = document.querySelectorAll('.part');
+            parts.forEach(part => part.classList.remove('expanded'));
+        }
+        
+        function expandAll() {
+            const parts = document.querySelectorAll('.part');
+            parts.forEach(part => {
+                part.classList.add('expanded');
+                const partId = part.dataset.partId;
+                if (!part.dataset.loaded) {
+                    loadPartContent(partId);
+                    part.dataset.loaded = 'true';
+                }
+            });
+        }
+        
+        function collapseAllLogs() {
+            const logs = document.querySelectorAll('.log');
+            logs.forEach(log => log.classList.remove('expanded'));
+        }
+        
+        function expandAllLogs() {
+            const logs = document.querySelectorAll('.log');
+            logs.forEach(log => log.classList.add('expanded'));
+        }
+        
+        function loadPartContent(partId) {
+            const part = document.querySelector(`[data-part-id="${partId}"]`);
+            if (!part) return;
+            
+            const partData = findPartData(debugData, partId);
+            if (!partData) return;
+            
+            const contentDiv = part.querySelector('.part-content');
+            if (!contentDiv) return;
+            
+            contentDiv.innerHTML = renderPartContent(partData);
+        }
+        
+        function findPartData(data, partId) {
+            if (data.id === partId) return data;
+            for (const subpart of data.subparts || []) {
+                const found = findPartData(subpart, partId);
+                if (found) return found;
+            }
+            return null;
+        }
+        
+        function renderPartContent(partData) {
+            let html = '';
+            
+            // Create a list of all events (logs and subparts) with their timestamps
+            const events = [];
+            
+            // Add logs
+            for (const log of partData.logs || []) {
+                events.push({timestamp: log.timestamp, type: 'log', data: log});
+            }
+            
+            // Add subparts
+            for (const subpart of partData.subparts || []) {
+                events.push({timestamp: subpart.start_time, type: 'part', data: subpart});
+            }
+            
+            // Sort by timestamp
+            events.sort((a, b) => a.timestamp - b.timestamp);
+            
+            // Generate HTML for events in chronological order
+            for (const event of events) {
+                if (event.type === 'log') {
+                    html += renderLog(event.data);
+                } else if (event.type === 'part') {
+                    html += renderPartMinimal(event.data);
+                }
+            }
+            
+            return html;
+        }
+        
+        function renderLog(logData) {
+            const logTimestamp = formatTimestamp(logData.timestamp);
+            const logIcon = getLogIcon(logData.log_class);
+            const locationStr = logData.file_location || '';
+            
+            return `
+                <div class="log">
+                    <div class="log-header">
+                        <div class="log-header-left">
+                            <span class="icon">${logIcon}</span>
+                            <span class="log-class ${logData.log_class}">[${logData.log_class}]</span>
+                        </div>
+                        <div class="log-header-right">
+                            ${locationStr ? `<span class="location">${escapeHtml(locationStr)}</span>` : ''}
+                            <span class="timestamp">${logTimestamp}</span>
+                            <button class="log-collapse-btn" onclick="toggleLogCollapse(this)"></button>
+                        </div>
+                    </div>
+                    <div class="log-content">${escapeHtml(logData.message)}</div>
+                </div>
+            `;
+        }
+        
+        function renderPartMinimal(partData) {
+            const icon = getPartIcon(partData.part_class);
+            const durationStr = formatDuration(partData.duration);
+            const timestampStr = formatTimestamp(partData.start_time);
+            const startLocationStr = partData.start_location || '';
+            const endLocationStr = partData.end_location || '';
+            const locationStr = startLocationStr ? (endLocationStr && endLocationStr !== startLocationStr ? 
+                `${startLocationStr} -> ${endLocationStr}` : startLocationStr) : '';
+            const combinedStr = partData.combined_count > 0 ? 
+                ` <span style="color: white; font-weight: bold; background: #a53c6b; padding: 2px; border-radius: 5px;">(ran ${partData.combined_count} more times...)</span>` : '';
+            
+            return `
+                <div class="part" data-part-id="${partData.id}">
+                    <div class="part-header">
+                        <div class="part-header-left">
+                            <span class="icon">${icon}</span>
+                            <span class="part-class ${partData.part_class}">[${partData.part_class}]</span>
+                            <span>${escapeHtml(partData.name)}</span>${combinedStr}
+                        </div>
+                        <div class="part-header-right">
+                            ${locationStr ? `<span class="location">${escapeHtml(locationStr)}</span>` : ''}
+                            ${durationStr ? `<span class="duration">${durationStr}</span>` : ''}
+                            ${timestampStr ? `<span class="timestamp">${timestampStr}</span>` : ''}
+                            <button class="collapse-btn" onclick="toggleCollapse(this)"></button>
+                        </div>
+                    </div>
+                    <div class="part-content"></div>
+                </div>
+            `;
+        }
+        
+        function getLogIcon(logClass) {
+            if (logClass.includes('SUCCESS')) return '✅';
+            if (logClass.includes('FAILED') || logClass.includes('ERROR')) return '❌';
+            if (logClass.includes('DOWNLOAD')) return '⬇️';
+            if (logClass.includes('OPERATOR')) return '⚙️';
+            if (logClass.includes('INFO')) return 'ℹ️';
+            return '📝';
+        }
+        
+        function getPartIcon(partClass) {
+            if (partClass.includes('EXECUTION')) return '🚀';
+            if (partClass.includes('GET_BY_ID')) return '🔍';
+            if (partClass.includes('FILTER')) return '🔧';
+            if (partClass.includes('EQUALS')) return '⚖️';
+            if (partClass.includes('COUNT')) return '🔢';
+            if (partClass.includes('QUERY')) return '🔍';
+            if (partClass.includes('OPERATOR')) return '⚙️';
+            if (partClass.includes('SCOPE')) return '🌐';
+            if (partClass.includes('DOWNLOAD')) return '⬇️';
+            if (partClass.includes('PARSE')) return '📝';
+            if (partClass.includes('RENDER')) return '🎨';
+            return '⚙️';
+        }
+        
+        function formatDuration(duration) {
+            if (!duration || duration <= 0) return '';
+            if (duration < 0.001) return `${(duration * 1000).toFixed(3)}ms`;
+            if (duration < 1) return `${(duration * 1000).toFixed(1)}ms`;
+            return `${duration.toFixed(3)}s`;
+        }
+        
+        function formatTimestamp(timestamp) {
+            if (!timestamp || timestamp <= 0) return '';
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleString('en-US', {timeZone: 'America/Chicago'}) + '.' + 
+                   Math.floor((timestamp % 1) * 1000).toString().padStart(3, '0');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        }
+        </script>
+        
+</body></html>

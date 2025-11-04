@@ -55,6 +55,7 @@ def filter_by_source_operator_runner(context: ObjectList, arguments: Arguments, 
     filtered = context.filter_by_source(args.source_name)
     selected = [obj.select_sources(args.source_name) for obj in filtered.objects]
     selected = [obj for obj in selected if obj is not None]
+    # Note: select_sources creates new ObjectGrouping instances, so we can't directly reuse cache
     return ObjectList(selected)
 
 FilterBySourceOperator = Operator(

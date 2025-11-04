@@ -404,11 +404,16 @@ def parse_tokens_into_querytype(all_tokens: Tokens, tokens: Tokens, area: QueryA
     return get_parser_results(results)
 
 def parse_query_into_querytype(query: str) -> QueryType:
+    debugger.start_part("TOKENIZE", "Tokenize query")
     tokens = get_tokens_from_query(query)
+    debugger.end_part("Tokenize query")
     result = None
     try:
+        debugger.start_part("PARSE_TOKENS", "Parse tokens into query type")
         result = parse_tokens_into_querytype(tokens, tokens, QueryArea(0, len(tokens), QueryAreaTerms.TOKEN, tokens))
+        debugger.end_part("Parse tokens into query type")
     except Exception as e:
+        debugger.end_part_if_current("Parse tokens into query type")
         raise e
     return result
 
@@ -419,10 +424,16 @@ def run_query(query: str, query_state: QueryState) -> QueryType:
     debugger.log("QUERY_START_SCOPES", Scopes(query_state.final_needed_scopes))
     debugger.log("QUERY_DOWNLOADED_SCOPES", Scopes(query_state.providers.downloaded_scopes))
     try:
+        debugger.start_part("PARSE", "Parse query")
         parsed_query = parse_query_into_querytype(query)
+        debugger.end_part("Parse query")
         if isinstance(parsed_query, Chain):
+            debugger.start_part("CHAIN", "Execute chain")
             result = parsed_query.run(query_state.all_data, query_state)
+            debugger.end_part("Execute chain")
         else:
+            debugger.end_part_if_current("Execute chain")
+            debugger.end_part_if_current("Parse query")
             result = parsed_query
     except QueryError as e:
         debugger.end_part(f"Run query")
@@ -433,8 +444,12 @@ def run_query(query: str, query_state: QueryState) -> QueryType:
     return result
 
 def execute_query(query: str, providers: Providers) -> tuple[QueryType, QueryState]:
+    debugger.start_part("RESET", "Reset all data")
     providers.all_data.reset()
+    debugger.end_part("Reset all data")
+    debugger.start_part("SETUP", "Setup query state")
     query_state = QueryState.setup(providers)
+    debugger.end_part("Setup query state")
     query_result = run_query(query, query_state)
     return query_result, query_state
 

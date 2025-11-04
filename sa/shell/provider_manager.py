@@ -122,6 +122,8 @@ class ProviderConnection:
             
             # Parse JSON response
             data = response.json()
+
+            print("Downloaded data")
             
             # Convert each object to SAObject
             sa_objects = []
@@ -220,13 +222,13 @@ class ProviderConnection:
             
         except requests.exceptions.RequestException as e:
             print(f"    ✗ Failed to fetch lazy data: {e}")
-            return []
+            return None, str(e)
         except json.JSONDecodeError as e:
             print(f"    ✗ Invalid JSON response: {e}")
-            return []
+            return None, str(e)
         except Exception as e:
             print(f"    ✗ Unexpected error fetching lazy data: {e}")
-            return []
+            return None, str(e)
 
 @dataclass
 class Providers:
@@ -235,14 +237,19 @@ class Providers:
     downloaded_scopes: set[Scope]
 
     def fetch_initial_data(self) -> ObjectList:
+        debugger.start_part("FETCH_INITIAL_DATA", "Fetch initial data")
         all_objects = []
         
         for connection in self.connections:
             print(f"  📥 Fetching from: {connection.name}")
             data = connection.fetch_initial_data()
+            print("Fetched data")
             all_objects.extend(data)
         
-        self.all_data = ObjectList(group_objects(all_objects))
+        grouped_objects = group_objects(all_objects)
+        self.all_data = ObjectList(grouped_objects)
+        self.all_data.validate_uniqueness()
+        debugger.end_part("Fetch initial data")
 
     def download_scope(self, scope: Scope) -> bool:
         """Download data for the specified scope using lazy loading."""
@@ -353,6 +360,7 @@ def load_providers(providers_file: Union[str, None] = None) -> Providers:
     Returns:
         Providers object with discovered SAP connections
     """
+    debugger.start_part("LOAD_PROVIDERS", "Load providers")
     # Default to ~/.sa/saps.txt if no file specified
     if providers_file is None:
         home_dir = os.path.expanduser("~")
@@ -376,6 +384,7 @@ def load_providers(providers_file: Union[str, None] = None) -> Providers:
     
     if not os.path.exists(providers_file):
         print(f"⚠ Warning: {providers_file} not found. No providers loaded.")
+        debugger.end_part("Load providers")
         return Providers(
             connections=[],
             all_data=ObjectList([]),
@@ -396,6 +405,7 @@ def load_providers(providers_file: Union[str, None] = None) -> Providers:
     
     if not initial_urls:
         print("No URLs found in providers file.")
+        debugger.end_part("Load providers")
         return Providers(
             connections=[],
             all_data=ObjectList([]),
@@ -408,6 +418,7 @@ def load_providers(providers_file: Union[str, None] = None) -> Providers:
     connections = discover_sap_servers_recursively(initial_urls)
     
     print(f"✅ Discovery complete: Found {len(connections)} SAP server(s)")
+    debugger.end_part("Load providers")
     
     return Providers(
         connections=connections,

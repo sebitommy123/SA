@@ -8,10 +8,12 @@ in a hierarchical structure for debugging query language operations.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 import time
 from datetime import datetime
 import pytz
+import inspect
+import os
 
 
 @dataclass
@@ -20,6 +22,7 @@ class LogEntry:
     message: str
     timestamp: float
     log_class: str = "INFO"
+    file_location: Optional[str] = None
     
     def __str__(self) -> str:
         return f"[{self.log_class}] {self.message}"
@@ -34,6 +37,9 @@ class Part:
     parent: 'Part | None' = None
     start_time: float = 0.0
     end_time: float = 0.0
+    start_location: Optional[str] = None
+    end_location: Optional[str] = None
+    combined_count: int = 0
     
     @property
     def duration(self) -> float:
@@ -55,6 +61,50 @@ class Debugger:
         """Initialize the debugger state."""
         self.root_part: Part = Part(name="root")
         self.current_part: Part = self.root_part
+        self._total_overhead_time: float = 0.0
+        self._enabled: bool = False
+    
+    def enable(self) -> None:
+        """Enable the debugger. When disabled, all methods are no-ops for performance."""
+        self._enabled = True
+    
+    def _get_caller_location(self) -> Optional[str]:
+        """Get the file:line location of the caller."""
+        try:
+            # Get the frame that called the debugger method (skip internal frames)
+            # Frame 0 is _get_caller_location itself
+            # Frame 1 is the debugger method (log, start_part, end_part)
+            # Frame 2 is the actual caller we want
+            frame = inspect.currentframe()
+            if frame is None:
+                return None
+            
+            # Skip to the caller frame (2 levels up from here)
+            caller_frame = frame.f_back
+            if caller_frame is None:
+                return None
+            caller_frame = caller_frame.f_back
+            if caller_frame is None:
+                return None
+            
+            filename = caller_frame.f_code.co_filename
+            lineno = caller_frame.f_lineno
+            
+            # Get relative path from workspace or absolute path
+            # Try to get relative path, fall back to basename if not in workspace
+            try:
+                # Get workspace path - assume it's the parent directory of 'sa'
+                workspace_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                if filename.startswith(workspace_root):
+                    rel_path = os.path.relpath(filename, workspace_root)
+                    return f"{rel_path}:{lineno}"
+            except (ValueError, OSError):
+                pass
+            
+            # Fallback to basename if relative path doesn't work
+            return f"{os.path.basename(filename)}:{lineno}"
+        except Exception:
+            return None
     
     def start_part(self, part_class: str, part_name: str) -> None:
         """
@@ -63,10 +113,63 @@ class Debugger:
         Args:
             part_class: Class/category of the part (e.g., "EXECUTION", "OPERATOR", "QUERY")
             part_name: Name of the part being started
+            
+        Raises:
+            ValueError: If a subpart with the same part_class already exists
         """
-        new_part = Part(name=part_name, part_class=part_class, parent=self.current_part, start_time=time.time())
+        if not self._enabled:
+            return
+        start_time = time.time()
+        location = self._get_caller_location()
+        
+        # Check for existing subpart with the same class
+        # Allow duplicates only if they are all contiguous at the end of the subparts list
+        subparts = self.current_part.subparts
+        if subparts:
+            # Find the last index where the class is different from the new one
+            # This tells us where the contiguous block of same-class subparts ends
+            last_different_index = -1
+            for i in range(len(subparts) - 1, -1, -1):
+                if subparts[i].part_class != part_class:
+                    last_different_index = i
+                    break
+            
+            # Check if there's a subpart with the same class before the contiguous block at the end
+            # If we found a different class subpart, check if any same-class subparts exist before it
+            if last_different_index >= 0:
+                for i in range(last_different_index + 1):
+                    if subparts[i].part_class == part_class:
+                        # Found a non-contiguous duplicate - error!
+                        existing_subpart = subparts[i]
+                        existing_location = existing_subpart.start_location or "unknown location"
+                        new_location = location or "unknown location"
+                        raise ValueError(
+                            f"Cannot add subpart with class '{part_class}' to part '{self.current_part.name}'. "
+                            f"Found a non-contiguous duplicate: a subpart with class '{part_class}' exists "
+                            f"but is not at the end of the subparts list.\n"
+                            f"  Non-contiguous subpart: name='{existing_subpart.name}', "
+                            f"class='{existing_subpart.part_class}', location={existing_location}\n"
+                            f"  New subpart: name='{part_name}', class='{part_class}', location={new_location}\n"
+                            f"  Parent part: name='{self.current_part.name}', "
+                            f"class='{self.current_part.part_class}', "
+                            f"has {len(subparts)} existing subpart(s)\n"
+                            f"  Note: Duplicates are only allowed if they are all contiguous at the end."
+                        )
+        
+        new_part = Part(name=part_name, part_class=part_class, parent=self.current_part, 
+                       start_time=time.time(), start_location=location)
         self.current_part.subparts.append(new_part)
         self.current_part = new_part
+        self._total_overhead_time += time.time() - start_time
+
+    def end_part_if_current(self, part_name: str) -> None:
+        """
+        End the current execution part if it is the one being ended.
+        """
+        if not self._enabled:
+            return
+        if self.current_part.name == part_name:
+            self.end_part(part_name)
     
     def end_part(self, part_name: str) -> None:
         """
@@ -78,6 +181,9 @@ class Debugger:
         Raises:
             RuntimeError: If the part_name doesn't match the current part
         """
+        if not self._enabled:
+            return
+        start_time = time.time()
         if self.current_part.name != part_name:
             raise RuntimeError(
                 f"Part mismatch: trying to end '{part_name}' but current part is "
@@ -85,12 +191,46 @@ class Debugger:
                 "a missing end_part() call or incorrect nesting."
                 f"Current part: {self.current_part.name}"
             )
+
+        # Check if we should combine with the previous part (detect loops)
+        if self.current_part.parent is not None and len(self.current_part.parent.subparts) >= 2:
+            # Get the last 5 subparts (excluding current, which is the last one)
+            last_5_subparts = self.current_part.parent.subparts[-6:-1]  # Exclude current part
+            if len(last_5_subparts) >= 5:
+                name_set = set([part.name for part in last_5_subparts])
+                if len(name_set) == 1 and self.current_part.name in name_set:
+                    # We have a loop - combine with the previous part
+                    # Record current part's end time
+                    current_end_time = time.time()
+                    current_end_location = self._get_caller_location()
+                    
+                    # Get the previous part (the one before current in parent's subparts)
+                    previous_part = self.current_part.parent.subparts[-2]
+                    
+                    # Remove current part from parent's subparts
+                    self.current_part.parent.subparts.pop()
+                    
+                    # Combine with previous part:
+                    # - Increment combined_count
+                    previous_part.combined_count += 1
+                    # - Set end_time to current part's end_time
+                    previous_part.end_time = current_end_time
+                    # - Keep previous part's name the same (it already matches)
+                    # - Delete current part's subparts (we don't keep them)
+                    #   (current part will be garbage collected)
+                    
+                    # Move back to parent part
+                    self._move_to_parent()
+                    self._total_overhead_time += time.time() - start_time
+                    return
         
-        # Record end time
+        # Record end time and location
         self.current_part.end_time = time.time()
+        self.current_part.end_location = self._get_caller_location()
         
         # Move back to parent part
         self._move_to_parent()
+        self._total_overhead_time += time.time() - start_time
     
     def _move_to_parent(self) -> None:
         """Move current_part back to its parent."""
@@ -105,15 +245,94 @@ class Debugger:
             log_class: The class/category of the log (e.g., "INFO", "ERROR", "DEBUG")
             message: The log message to add
         """
-        log_entry = LogEntry(message=message, timestamp=time.time(), log_class=log_class)
+        if not self._enabled:
+            return
+        start_time = time.time()
+        location = self._get_caller_location()
+        log_entry = LogEntry(message=message, timestamp=time.time(), log_class=log_class, file_location=location)
         self.current_part.logs.append(log_entry)
+        self._total_overhead_time += time.time() - start_time
     
     def _format_timestamp(self, timestamp: float) -> str:
         """Convert Unix timestamp to readable date in Chicago timezone."""
         chicago_tz = pytz.timezone('America/Chicago')
         dt = datetime.fromtimestamp(timestamp, tz=chicago_tz)
         return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]  # Remove last 3 digits for milliseconds
+    
+    def _format_duration(self, duration: float) -> str:
+        """Format duration in a human-readable way."""
+        if duration < 0.001:
+            return f"{duration*1000:.3f}ms"
+        elif duration < 1:
+            return f"{duration*1000:.1f}ms"
+        else:
+            return f"{duration:.3f}s"
 
+    def _to_text(self, part: Part, indent: int = 0) -> str:
+        """Convert debugger state to plain text format."""
+        lines = []
+        indent_str = "  " * indent
+        
+        # Format location string
+        location_str = ""
+        if part.start_location:
+            if part.end_location and part.end_location != part.start_location:
+                location_str = f" [{part.start_location} -> {part.end_location}]"
+            else:
+                location_str = f" [{part.start_location}]"
+        
+        # Format duration
+        duration_str = ""
+        if part.duration > 0:
+            if part.duration < 0.001:
+                duration_str = f" ({part.duration*1000:.3f}ms)"
+            elif part.duration < 1:
+                duration_str = f" ({part.duration*1000:.1f}ms)"
+            else:
+                duration_str = f" ({part.duration:.3f}s)"
+        
+        # Format timestamp
+        timestamp_str = ""
+        if part.start_time > 0:
+            timestamp_str = f" @ {self._format_timestamp(part.start_time)}"
+        
+        # Format combined count
+        combined_str = ""
+        if part.combined_count > 0:
+            combined_str = f" (ran {part.combined_count} more times...)"
+        
+        # Part header
+        lines.append(f"{indent_str}[{part.part_class}] {part.name}{combined_str}{location_str}{duration_str}{timestamp_str}")
+        
+        # Create a list of all events (logs and subparts) with their timestamps
+        events = []
+        
+        # Add logs
+        for log in part.logs:
+            events.append((log.timestamp, 'log', log))
+        
+        # Add subparts
+        for subpart in part.subparts:
+            events.append((subpart.start_time, 'part', subpart))
+        
+        # Sort by timestamp
+        events.sort(key=lambda x: x[0])
+        
+        # Generate text for events in chronological order
+        for timestamp, event_type, event_data in events:
+            if event_type == 'log':
+                log_timestamp = self._format_timestamp(event_data.timestamp)
+                location_str = f" [{event_data.file_location}]" if event_data.file_location else ""
+                lines.append(f"{indent_str}  [{event_data.log_class}] @ {log_timestamp}{location_str}")
+                # Format message with indentation for multi-line
+                message_lines = str(event_data.message).split('\n')
+                for msg_line in message_lines:
+                    lines.append(f"{indent_str}    {msg_line}")
+            elif event_type == 'part':
+                lines.append(self._to_text(event_data, indent + 1))
+        
+        return "\n".join(lines)
+    
     def to_html(self) -> str:
         """Generate HTML representation of the debugger state."""
         html = []
@@ -263,6 +482,15 @@ class Debugger:
             border-radius: 4px;
             white-space: nowrap;
         }
+        .location { 
+            color: #9b59b6; 
+            font-size: 0.75em;
+            background: #f4ecf7;
+            padding: 3px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            font-family: monospace;
+        }
         .log-class { 
             font-weight: bold;
             padding: 2px 4px;
@@ -346,6 +574,19 @@ class Debugger:
         .part:not(.expanded) .collapse-btn::after {
             content: "▶";
         }
+        .text-output {
+            background: #f8f9fa;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow-x: auto;
+            max-height: none;
+        }
         @media (max-width: 768px) {
             .part-header {
                 flex-direction: column;
@@ -367,11 +608,47 @@ class Debugger:
         """)
         html.append("</style>")
         html.append("</head><body>")
+        
+        # Generate text output for text mode
+        text_output = self._to_text(self.root_part)
+        # Escape for HTML (basic escaping)
+        import html as html_module
+        text_output_escaped = html_module.escape(text_output)
+        
+        html.append("""
+        <script>
+        // Check if ?text is in URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const isTextMode = urlParams.has('text');
+        </script>
+        """)
+        
+        # Format overhead time
+        overhead_str = self._format_duration(self._total_overhead_time)
+        
+        # Text mode output (hidden by default, shown via JS)
+        html.append(f'<div id="text-mode-output" style="display: none;">')
+        html.append('<div class="container">')
+        html.append('<div class="header">')
+        html.append('<h1><span class="icon">🐛</span> SA Query Debug Output (Text Mode)</h1>')
+        html.append(f'<div style="margin-top: 10px; font-size: 0.9em; opacity: 0.9;">Debugger overhead: {overhead_str}</div>')
+        html.append('</div>')
+        html.append('<div class="global-controls">')
+        html.append('<button onclick="window.location.href=window.location.pathname">View HTML Mode</button>')
+        html.append('</div>')
+        html.append(f'<div class="text-output"><pre>{text_output_escaped}</pre></div>')
+        html.append('</div>')
+        html.append('</div>')
+        
+        # HTML mode output (hidden by default, shown via JS)
+        html.append('<div id="html-mode-output" style="display: none;">')
         html.append('<div class="container">')
         html.append('<div class="header">')
         html.append('<h1><span class="icon">🐛</span> SA Query Debug Output</h1>')
+        html.append(f'<div style="margin-top: 10px; font-size: 0.9em; opacity: 0.9;">Debugger overhead: {overhead_str}</div>')
         html.append('</div>')
         html.append('<div class="global-controls">')
+        html.append('<button onclick="window.location.href=window.location.pathname + \'?text\'">View Text Mode</button>')
         html.append('<button onclick="collapseAll()">Collapse All</button>')
         html.append('<button onclick="expandAll()">Expand All</button>')
         html.append('<button onclick="collapseAllLogs()">Collapse All Logs</button>')
@@ -382,12 +659,21 @@ class Debugger:
         html.append(f'<div class="current-part"><span class="icon">📍</span> Current part: {self.current_part.name}</div>')
         html.append('</div>')
         html.append('</div>')
+        html.append('</div>')
         
-        # Generate JavaScript data
+        # Generate JavaScript data for HTML mode
         debug_data = self._to_js_data(self.root_part)
+        
+        # JavaScript to show/hide the appropriate mode
         html.append(f"""
         <script>
-        const debugData = {debug_data};
+        if (isTextMode) {{
+            document.getElementById('text-mode-output').style.display = 'block';
+        }} else {{
+            document.getElementById('html-mode-output').style.display = 'block';
+            
+            // Only load JavaScript for HTML mode
+            const debugData = {debug_data};
         
         function toggleCollapse(element) {{
             const part = element.closest('.part');
@@ -498,6 +784,7 @@ class Debugger:
         function renderLog(logData) {{
             const logTimestamp = formatTimestamp(logData.timestamp);
             const logIcon = getLogIcon(logData.log_class);
+            const locationStr = logData.file_location || '';
             
             return `
                 <div class="log">
@@ -507,6 +794,7 @@ class Debugger:
                             <span class="log-class ${{logData.log_class}}">[${{logData.log_class}}]</span>
                         </div>
                         <div class="log-header-right">
+                            ${{locationStr ? `<span class="location">${{escapeHtml(locationStr)}}</span>` : ''}}
                             <span class="timestamp">${{logTimestamp}}</span>
                             <button class="log-collapse-btn" onclick="toggleLogCollapse(this)"></button>
                         </div>
@@ -520,6 +808,12 @@ class Debugger:
             const icon = getPartIcon(partData.part_class);
             const durationStr = formatDuration(partData.duration);
             const timestampStr = formatTimestamp(partData.start_time);
+            const startLocationStr = partData.start_location || '';
+            const endLocationStr = partData.end_location || '';
+            const locationStr = startLocationStr ? (endLocationStr && endLocationStr !== startLocationStr ? 
+                `${{startLocationStr}} -> ${{endLocationStr}}` : startLocationStr) : '';
+            const combinedStr = partData.combined_count > 0 ? 
+                ` <span style="color: white; font-weight: bold; background: #a53c6b; padding: 2px; border-radius: 5px;">(ran ${{partData.combined_count}} more times...)</span>` : '';
             
             return `
                 <div class="part" data-part-id="${{partData.id}}">
@@ -527,9 +821,10 @@ class Debugger:
                         <div class="part-header-left">
                             <span class="icon">${{icon}}</span>
                             <span class="part-class ${{partData.part_class}}">[${{partData.part_class}}]</span>
-                            <span>${{partData.name}}</span>
+                            <span>${{escapeHtml(partData.name)}}</span>${{combinedStr}}
                         </div>
                         <div class="part-header-right">
+                            ${{locationStr ? `<span class="location">${{escapeHtml(locationStr)}}</span>` : ''}}
                             ${{durationStr ? `<span class="duration">${{durationStr}}</span>` : ''}}
                             ${{timestampStr ? `<span class="timestamp">${{timestampStr}}</span>` : ''}}
                             <button class="collapse-btn" onclick="toggleCollapse(this)"></button>
@@ -582,6 +877,7 @@ class Debugger:
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }}
         }}
         </script>
         """)
@@ -641,14 +937,29 @@ class Debugger:
         elif "RENDER" in part.part_class:
             icon = "🎨"
         
+        # Format location string
+        location_str = ""
+        if part.start_location:
+            if part.end_location and part.end_location != part.start_location:
+                location_str = f"{part.start_location} -> {part.end_location}"
+            else:
+                location_str = part.start_location
+        
+        # Format combined count
+        combined_str = ""
+        if part.combined_count > 0:
+            combined_str = f' <span style="color: white; font-weight: bold; background: #a53c6b; padding: 2px; border-radius: 5px;">(ran {part.combined_count} more times...)</span>'
+        
         html.append(f'<div class="part">')
         html.append(f'<div class="part-header">')
         html.append(f'<div class="part-header-left">')
         html.append(f'<span class="icon">{icon}</span>')
         html.append(f'<span class="part-class {part.part_class}">[{part.part_class}]</span>')
-        html.append(f'<span>{part.name}</span>')
+        html.append(f'<span>{part.name}</span>{combined_str}')
         html.append('</div>')
         html.append(f'<div class="part-header-right">')
+        if location_str:
+            html.append(f'<span class="location">{location_str}</span>')
         if duration_str:
             html.append(f'<span class="duration">{duration_str}</span>')
         if timestamp_str:
@@ -689,6 +1000,7 @@ class Debugger:
                 elif "INFO" in event_data.log_class:
                     log_icon = "ℹ️"
                 
+                location_str = event_data.file_location or ""
                 html.append(f'<div class="log">')
                 html.append(f'<div class="log-header">')
                 html.append(f'<div class="log-header-left">')
@@ -696,6 +1008,8 @@ class Debugger:
                 html.append(f'<span class="log-class {event_data.log_class}">[{event_data.log_class}]</span>')
                 html.append('</div>')
                 html.append(f'<div class="log-header-right">')
+                if location_str:
+                    html.append(f'<span class="location">{location_str}</span>')
                 html.append(f'<span class="timestamp">{log_timestamp}</span>')
                 html.append('<button class="log-collapse-btn" onclick="toggleLogCollapse(this)"></button>')
                 html.append('</div>')
@@ -756,14 +1070,29 @@ class Debugger:
         # Generate unique ID for this part
         part_id = f"part_{id(part)}"
         
+        # Format location string
+        location_str = ""
+        if part.start_location:
+            if part.end_location and part.end_location != part.start_location:
+                location_str = f"{part.start_location} -> {part.end_location}"
+            else:
+                location_str = part.start_location
+        
+        # Format combined count
+        combined_str = ""
+        if part.combined_count > 0:
+            combined_str = f' <span style="color: white; font-weight: bold; background: #a53c6b; padding: 2px; border-radius: 5px;">(ran {part.combined_count} more times...)</span>'
+        
         html.append(f'<div class="part" data-part-id="{part_id}">')
         html.append(f'<div class="part-header">')
         html.append(f'<div class="part-header-left">')
         html.append(f'<span class="icon">{icon}</span>')
         html.append(f'<span class="part-class {part.part_class}">[{part.part_class}]</span>')
-        html.append(f'<span>{part.name}</span>')
+        html.append(f'<span>{part.name}</span>{combined_str}')
         html.append('</div>')
         html.append(f'<div class="part-header-right">')
+        if location_str:
+            html.append(f'<span class="location">{location_str}</span>')
         if duration_str:
             html.append(f'<span class="duration">{duration_str}</span>')
         if timestamp_str:
@@ -799,11 +1128,15 @@ class Debugger:
                 'start_time': float(p.start_time) if p.start_time else 0.0,
                 'end_time': float(p.end_time) if p.end_time else 0.0,
                 'duration': float(p.duration) if p.duration else 0.0,
+                'start_location': safe_str(p.start_location),
+                'end_location': safe_str(p.end_location),
+                'combined_count': int(p.combined_count) if p.combined_count else 0,
                 'logs': [
                     {
                         'message': safe_str(log.message),
                         'timestamp': float(log.timestamp) if log.timestamp else 0.0,
-                        'log_class': safe_str(log.log_class)
+                        'log_class': safe_str(log.log_class),
+                        'file_location': safe_str(log.file_location)
                     }
                     for log in p.logs
                 ],
@@ -817,6 +1150,7 @@ class Debugger:
         """Reset the debugger state (useful for testing)."""
         self.root_part = Part(name="root")
         self.current_part = self.root_part
+        self._total_overhead_time = 0.0
 
 
 # Global debugger instance
