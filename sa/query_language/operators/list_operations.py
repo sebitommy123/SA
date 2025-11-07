@@ -50,8 +50,7 @@ def filter_operator_runner(context: QueryContext, arguments: Arguments, query_st
                 survivors.append(grouped_object)
         
         debugger.end_part("Filtering objects")
-        # Pass parent cache - ObjectList will automatically filter it down
-        return ObjectList(survivors, cache=context._cache)
+        return ObjectList(survivors)
     else:  # Regular Python list
         survivors = []
         for item in context:
@@ -89,14 +88,7 @@ def map_operator_runner(context: QueryContext, arguments: Arguments, query_state
         if len(results) == 0:
             return []
         if isinstance(results[0], ObjectGrouping):
-            # Check if results are the same objects (identity check) or new ones
-            # If they're the same, we can reuse cache; otherwise we can't
-            if len(results) == len(context.objects) and all(r is obj for r, obj in zip(results, context.objects)):
-                # Same objects, pass parent cache - ObjectList will automatically filter it down
-                return ObjectList(results, cache=context._cache)
-            else:
-                # New/modified objects, can't reuse cache
-                return ObjectList(results)
+            return ObjectList(results)
         return results
     else:  # Regular Python list
         results = [args.chain.run(item, QueryState.setup(query_state.providers)) for item in context]

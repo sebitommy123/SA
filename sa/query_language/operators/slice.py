@@ -38,8 +38,7 @@ def slice_operator_runner(context: QueryContext, arguments: Arguments, query_sta
     
     # Return appropriate type based on input context
     if isinstance(context, ObjectList) and not isinstance(result_items, ObjectGrouping):
-        # result_items is a slice/subset of context.objects, so we can reuse the cache
-        return ObjectList(result_items, cache=context._cache)
+        return ObjectList(result_items)
     else:
         return result_items
 

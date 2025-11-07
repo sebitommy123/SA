@@ -2,9 +2,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from ast import List
 from typing import TYPE_CHECKING, Optional
+from itertools import chain
 
 from sa.query_language.errors import QueryError
-from sa.core.caches import ObjectGroupingCache
 
 if TYPE_CHECKING:
     from .sa_object import SAObject
@@ -17,19 +17,32 @@ class ObjectGrouping:
     _objects: List[SAObject]
     _field_overrides: dict[str, SAType]
     _selected_fields: Optional[set[str]]
-    _cache: ObjectGroupingCache = field(default=None, init=False, repr=False)
+    # Pre-computed cached properties
+    types: set[str] = field(default=None, init=False, repr=False)
+    id_types: set[tuple[str, str]] = field(default=None, init=False, repr=False)
+    unique_ids: set[tuple[str, str, str]] = field(default=None, init=False, repr=False)
+    sources: set[str] = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         from sa.query_language.debug import debugger
-        debugger.start_part("OBJECT_GROUPING_INIT", "Setting up ObjectGrouping")
         assert len({obj.id for obj in self._objects}) == 1, f"ObjectGrouping has multiple ids: {self._objects}"
         for obj in self._objects:
             from sa.core.sa_object import SAObject
             assert isinstance(obj, SAObject), f"ObjectGrouping must contain SAObject objects, got {type(obj).__name__}"
         assert len({obj.source for obj in self._objects}) == len(self._objects), f"ObjectGrouping has objects from the same source: {self._objects}"
-        # Initialize cache
-        self._cache = ObjectGroupingCache(self)
-        debugger.end_part("Setting up ObjectGrouping")
+        
+        # Pre-compute all cached values
+        # Use chain.from_iterable to flatten without creating intermediate lists
+        self.types = set(chain.from_iterable(obj.types for obj in self._objects))
+        
+        # obj.id_types already returns a set, so we can chain them directly
+        self.id_types = set(chain.from_iterable(obj.id_types for obj in self._objects))
+        
+        # obj.unique_ids already returns a set, so we can chain them directly
+        self.unique_ids = set(chain.from_iterable(obj.unique_ids for obj in self._objects))
+        
+        # Use set comprehension for better performance
+        self.sources = {obj.source for obj in self._objects}
 
     def reset(self):
         """Reset field overrides and selected fields if they are set."""
@@ -41,24 +54,8 @@ class ObjectGrouping:
         # don't affect types/id_types/unique_ids/sources (which are computed from _objects)
 
     @property
-    def id_types(self) -> set[tuple[str, str]]:
-        return self._cache.id_types()
-
-    @property
-    def unique_ids(self) -> set[tuple[str, str, str]]:
-        return self._cache.unique_ids()
-
-    @property
-    def types(self) -> set[str]:
-        return self._cache.types()
-
-    @property
     def id(self) -> str:
         return self._objects[0].id
-
-    @property
-    def sources(self) -> set[str]:
-        return self._cache.sources()
 
     def has_id_type(self, id_type: tuple[str, str]) -> bool:
         return id_type in self.id_types
